@@ -50,4 +50,6 @@ node --test tests/*.test.mjs
 
 I percorsi dell’app sono relativi, così il sito funziona anche sotto `/pasti/`. GitHub Pages pubblica la radice del ramo `main`; [.nojekyll](.nojekyll) evita la trasformazione dei file. Non è necessario un passaggio di build.
 
+Gli URL di CSS e moduli JavaScript includono una versione per evitare che il browser mescoli file di rilasci diversi. A ogni rilascio che modifica questi file, aggiorna lo stesso parametro `v` in `index.html`, negli import di `app.js` e negli import di `src/planner.js`.
+
 La cartella `work/` contiene esclusivamente coordinamento e prove locali ed è esclusa da Git. Profilo, diario, backup e credenziali non devono essere aggiunti al repository.

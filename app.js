@@ -1,7 +1,7 @@
-import { ACTIVITY_LEVELS, calculateTargets, sumMacros } from './src/nutrition.js';
-import { FOODS, LIDL_FOOD_IDS, getFood } from './src/foods.js';
-import { createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } from './src/planner.js';
-import { STORAGE_KEY, MAX_BACKUP_BYTES, createEmptyData, validateData, parseBackup, loadData, saveData, exportBackup, clearData } from './src/storage.js';
+import { ACTIVITY_LEVELS, calculateTargets, sumMacros } from './src/nutrition.js?v=20261023-lidl';
+import { FOODS, LIDL_FOOD_IDS, getFood } from './src/foods.js?v=20261023-lidl';
+import { createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } from './src/planner.js?v=20261023-lidl';
+import { STORAGE_KEY, MAX_BACKUP_BYTES, createEmptyData, validateData, parseBackup, loadData, saveData, exportBackup, clearData } from './src/storage.js?v=20261023-lidl';
 
 const $ = selector => document.querySelector(selector);
 const clone = value => JSON.parse(JSON.stringify(value));
