@@ -1,5 +1,5 @@
 import { ACTIVITY_LEVELS, calculateTargets, sumMacros } from './src/nutrition.js';
-import { FOODS, getFood } from './src/foods.js';
+import { FOODS, LIDL_FOOD_IDS, getFood } from './src/foods.js';
 import { createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } from './src/planner.js';
 import { STORAGE_KEY, MAX_BACKUP_BYTES, createEmptyData, validateData, parseBackup, loadData, saveData, exportBackup, clearData } from './src/storage.js';
 
@@ -9,9 +9,8 @@ const round = value => Math.round(value).toLocaleString('it-IT');
 const formatDecimal = value => Number(value.toFixed(1)).toLocaleString('it-IT');
 const localDate = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 const longDate = key => new Intl.DateTimeFormat('it-IT', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date(`${key}T12:00:00`));
-const CARBS = ['pasta', 'rice', 'couscous', 'potatoes', 'lentil-pasta-lidl'];
+const CARBS = ['pasta', 'rice', 'couscous', 'potatoes', 'lentil-pasta-lidl', 'lentil-pasta-lidl-fresh'];
 const PROTEINS = ['chicken', 'eggs', 'egg-whites', 'salmon', 'tuna', 'pork-tenderloin'];
-const LABEL_FOODS = ['lentil-pasta-lidl', 'protein-pudding-lidl', 'protein-mousse-lidl'];
 const DAYS = [{ value: 1, label: 'Lun' }, { value: 2, label: 'Mar' }, { value: 3, label: 'Mer' }, { value: 4, label: 'Gio' }, { value: 5, label: 'Ven' }, { value: 6, label: 'Sab' }, { value: 0, label: 'Dom' }];
 const loaded = loadData();
 let data = loaded.data;
@@ -232,7 +231,21 @@ function editMeal(original) {
   const ingredientFields = h('div', { class: 'edit-ingredients' });
   const errors = h('p', { class: 'form-error', role: 'alert' });
   const controls = h('div', { class: 'swap-fields' });
+  const adaptation = h('div', { class: 'portion-update', 'aria-live': 'polite', 'aria-atomic': 'true', hidden: true });
   const alternatives = mealAlternatives(original, data.days[selectedDate].targets, data.foodOverrides);
+  const showAdaptation = before => {
+    const quantities = meal => meal.ingredients.reduce((map, item) => map.set(item.foodId, (map.get(item.foodId) || 0) + item.grams), new Map());
+    const previous = quantities(before);
+    const current = quantities(draft);
+    const ids = [...new Set([...previous.keys(), ...current.keys()])];
+    const changes = ids.filter(id => formatDecimal(previous.get(id) || 0) !== formatDecimal(current.get(id) || 0));
+    adaptation.hidden = changes.length === 0;
+    adaptation.replaceChildren(...(changes.length ? [
+      h('strong', {}, 'Porzioni adattate automaticamente'),
+      h('ul', {}, ...changes.map(id => h('li', {}, h('span', {}, getFood(id).name), h('span', { class: 'portion-change' },
+        !previous.has(id) ? `Aggiunto: ${formatDecimal(current.get(id))} g` : !current.has(id) ? `${formatDecimal(previous.get(id))} g → rimosso` : `${formatDecimal(previous.get(id))} → ${formatDecimal(current.get(id))} g`)))),
+    ] : []));
+  };
   const updateTotals = () => {
     try {
       draft = mealFromIngredients(draft, data.foodOverrides);
@@ -249,7 +262,7 @@ function editMeal(original) {
           : draft.ingredients.find(ingredient => ids.includes(ingredient.foodId));
         if (!current) continue;
         controls.append(field(label, h('select', { onchange: event => {
-          try { draft = swapMealFood(draft, current.foodId, event.target.value, data.foodOverrides); rebuild(); }
+          try { const before = clone(draft); draft = swapMealFood(draft, current.foodId, event.target.value, data.foodOverrides); rebuild(); showAdaptation(before); }
           catch (error) { errors.textContent = error.message; }
         } }, ...ids.map(id => h('option', { value: id, selected: id === current.foodId }, getFood(id).name)))));
       }
@@ -257,6 +270,8 @@ function editMeal(original) {
     ingredientFields.replaceChildren(...draft.ingredients.map((ingredient, index) => {
       const food = getFood(ingredient.foodId, data.foodOverrides);
       const grams = h('input', { id: `ingredient-${index}`, type: 'number', min: '0', max: '3000', step: '0.1', inputmode: 'decimal', value: Number(ingredient.grams.toFixed(1)), 'aria-label': `${food.name}, grammi`, oninput: event => {
+        adaptation.hidden = true;
+        adaptation.replaceChildren();
         const value = event.target.valueAsNumber;
         if (!Number.isFinite(value) || value < 0 || value > 3000) { errors.textContent = 'Inserisci una quantità tra 0 e 3.000 g.'; return; }
         draft.ingredients[index].grams = value;
@@ -270,9 +285,11 @@ function editMeal(original) {
     if (event.target.value === '') return;
     const index = Number(event.target.value);
     const choice = index === -1 ? original : alternatives[index];
-    if (choice) { draft = clone(choice); draft.id = original.id; draft.slot = original.slot; draft.time = original.time; rebuild(); }
+    if (choice) { const before = clone(draft); draft = clone(choice); draft.id = original.id; draft.slot = original.slot; draft.time = original.time; rebuild(); showAdaptation(before); }
   } }, h('option', { value: '' }, 'Scegli un’alternativa…'), h('option', { value: '-1' }, 'Pasto originale'), ...alternatives.map((meal, index) => h('option', { value: index }, meal.title)));
-  container.append(dialogHeading('Fai spazio alle tue scelte', 'Le dosi ricalcolano energia e macronutrienti.'), field('Alternative del pasto', variantSelect, original.slot === 'breakfast' ? 'Tra le colazioni: budino proteico, mousse proteica e yogurt greco con cioccolato.' : null), controls, ingredientFields,
+  container.append(dialogHeading('Fai spazio alle tue scelte', 'Le dosi ricalcolano energia e macronutrienti.'), field('Alternative del pasto', variantSelect, original.slot === 'breakfast' ? 'Tra le colazioni: budino proteico, mousse proteica e yogurt greco con cioccolato.' : null), controls,
+    ['lunch', 'dinner'].includes(original.slot) ? h('p', { class: 'swap-explanation' }, 'Cambiando alimento si adattano anche la porzione di carne, pesce o uova e l’olio. Le proteine di pasta e legumi sono già conteggiate.') : document.createDocumentFragment(),
+    adaptation, ingredientFields,
     h('p', { class: 'helper' }, 'Pesi della parte edibile: crudo o secco, salvo la nota dell’alimento. Per uova e albumi usa i grammi effettivi.'), values, errors,
     h('div', { class: 'dialog-actions' }, button('Annulla', closeDialog), button('Salva questo pasto', () => {
       if (errors.textContent) return;
@@ -418,36 +435,106 @@ function renderDataTools() {
       }, true), 'text-button danger-text')));
 }
 
+function refreshMealNote(meal) {
+  let note = meal.note;
+  if (meal.ingredients.some(item => LIDL_FOOD_IDS.includes(item.foodId) && getFood(item.foodId).group === 'breakfast')) {
+    note = note
+      .replace('Un vasetto da 200 g è solo un esempio: modifica grammi e valori con la confezione.', '')
+      .replace('Un vasetto da 200 g è solo un esempio: verifica peso ed etichetta.', '');
+  }
+  if (meal.ingredients.some(item => LIDL_FOOD_IDS.includes(item.foodId) && getFood(item.foodId).group === 'carb')) {
+    note = note.replace('Valori Lidl da verificare sulla confezione.', '');
+  }
+  if (note === meal.note) return note;
+  return `${note.replace(/ {2,}/g, ' ').trim()} Le dosi restano quelle indicate in grammi; il riferimento nutrizionale corrente è in Alimenti.`.trim();
+}
+
+function refreshPlannedMeals() {
+  try {
+    if (storageReadError) throw new Error('Prima recupera o cancella i dati locali dalla sezione Profilo.');
+    if (storageConflict) throw new Error('I dati sono cambiati in un’altra scheda. Ricarica la pagina prima di aggiornarli.');
+    const fromDate = localDate();
+    const next = clone(data);
+    const changedDays = [];
+    let mealCount = 0;
+    for (const [date, day] of Object.entries(next.days)) {
+      if (date < fromDate) continue;
+      let changed = false;
+      day.meals = day.meals.map(meal => {
+        if (Object.hasOwn(day.consumed, meal.id)) return meal;
+        const refreshed = mealFromIngredients(meal, next.foodOverrides);
+        refreshed.note = refreshMealNote(refreshed);
+        if (refreshed.note === meal.note && ['kcal', 'protein', 'carbs', 'fat'].every(key => Math.abs(refreshed.macros[key] - meal.macros[key]) < 1e-7)) return meal;
+        mealCount += 1;
+        changed = true;
+        return refreshed;
+      });
+      if (changed) changedDays.push(date);
+    }
+    if (!mealCount) { notify('I pasti da consumare sono già aggiornati.'); return; }
+    validateData(next);
+    confirmAction('Aggiornare i pasti pianificati?', `Aggiornerai i riferimenti nutrizionali di ${mealCount} ${mealCount === 1 ? 'pasto' : 'pasti'} dal ${longDate(fromDate)} in poi, inclusi i valori e le note obsolete. I grammi restano uguali. I pasti già mangiati, i giorni passati e le tue etichette personali non cambiano.`, 'Aggiorna valori', () => {
+      const now = new Date().toISOString();
+      changedDays.forEach(date => { next.days[date].updatedAt = now; });
+      persist(next);
+      if (!unsaved) notify(`${mealCount} ${mealCount === 1 ? 'pasto aggiornato' : 'pasti aggiornati'}. Le quantità sono rimaste uguali.`);
+    });
+  } catch (error) { notify(error.message, true); }
+}
+
+function foodStatus(item) {
+  if (Object.hasOwn(data.foodOverrides, item.id)) return h('span', { class: 'estimate-tag' }, 'Tua etichetta');
+  if (item.label) return h('span', { class: 'estimate-tag verified-tag' }, 'Etichetta verificata');
+  if (item.estimated) return h('span', { class: 'estimate-tag' }, 'Stima');
+  return null;
+}
+
+function labelReference(item) {
+  if (!item.label) return null;
+  const label = item.label;
+  const verified = new Date(`${label.verifiedOn}T12:00:00`);
+  const date = Number.isFinite(verified.getTime()) ? verified.toLocaleDateString('it-IT') : label.verifiedOn;
+  return h('div', { class: 'label-reference' },
+    Object.hasOwn(data.foodOverrides, item.id) && h('p', { class: 'label-reference-caption' }, 'Riferimento del catalogo; i tuoi valori personalizzati hanno la precedenza.'),
+    h('p', {}, `Formato ${formatDecimal(label.packGrams)} g · ${label.market}`),
+    h('p', {}, `Verifica del ${date}`),
+    label.barcode && h('p', {}, 'EAN della scheda fonte: ', h('span', { class: 'barcode' }, label.barcode)),
+    h('a', { href: label.evidenceUrl, target: '_blank', rel: 'noopener noreferrer' }, 'Vedi l’etichetta ↗'));
+}
+
 function renderFoods() {
   const food = getFood(labelFoodId, data.foodOverrides);
-  const orderedFoods = [...LABEL_FOODS.map(id => FOODS.find(item => item.id === id)).filter(Boolean), ...FOODS.filter(item => !LABEL_FOODS.includes(item.id))];
+  const orderedFoods = [...LIDL_FOOD_IDS.map(id => FOODS.find(item => item.id === id)).filter(Boolean), ...FOODS.filter(item => !LIDL_FOOD_IDS.includes(item.id))];
   const formError = h('p', { class: 'form-error', role: 'alert' });
   const form = h('form', { class: 'label-form' },
     field('Prodotto', h('select', { value: labelFoodId, onchange: event => { labelFoodId = event.target.value; render(); } }, ...orderedFoods.map(item => h('option', { value: item.id, selected: item.id === labelFoodId }, item.name)))),
-    h('p', { class: 'food-estimate-note' }, data.foodOverrides[labelFoodId] ? 'Valori personalizzati dalla tua etichetta.' : LABEL_FOODS.includes(labelFoodId) ? 'Valori generici stimati: non sono un’etichetta Lidl verificata. Trascrivi i valori della tua confezione.' : 'Valori di riferimento dal catalogo. Se la tua confezione riporta valori diversi, trascrivili qui.'),
+    h('div', { class: 'food-estimate-note' }, foodStatus(food), h('p', {}, data.foodOverrides[labelFoodId] ? 'Valori personalizzati dalla tua etichetta. Prevalgono sui valori del catalogo.' : food.label ? 'I valori di questa variante sono già inseriti. Puoi modificarli se la tua confezione è diversa per prodotto, gusto o formato.' : 'Valori di riferimento già presenti nel catalogo. La modifica è facoltativa, per una confezione con valori diversi.'), labelReference(food)),
     h('div', { class: 'form-grid label-grid' }, ...[{ key: 'kcal', label: 'Energia · kcal', max: 1000 }, { key: 'protein', label: 'Proteine · g', max: 100 }, { key: 'carbs', label: 'Carboidrati · g', max: 100 }, { key: 'fat', label: 'Grassi · g', max: 100 }].map(metric => field(metric.label, h('input', { name: metric.key, type: 'number', required: true, min: 0, max: metric.max, step: '0.1', inputmode: 'decimal', value: food[metric.key] })))),
-    formError, h('div', { class: 'form-actions' }, h('button', { type: 'submit', class: 'button primary' }, 'Salva valori per 100 g'), data.foodOverrides[labelFoodId] && button('Ripristina la stima', () => {
-      try { const next = clone(data); delete next.foodOverrides[labelFoodId]; persist(next); render(); notify('Ripristinati i valori stimati per i nuovi piani.'); } catch (error) { notify(error.message, true); }
+    formError, h('div', { class: 'form-actions' }, h('button', { type: 'submit', class: 'button primary' }, 'Salva valori per 100 g'), data.foodOverrides[labelFoodId] && button('Ripristina i valori del catalogo', () => {
+      try { const next = clone(data); delete next.foodOverrides[labelFoodId]; persist(next); render(); if (!unsaved) notify('Ripristinati i valori del catalogo per i nuovi piani.'); } catch (error) { notify(error.message, true); }
     }, 'text-button')),
-    h('p', { class: 'helper' }, 'I nuovi valori si usano nei piani creati da ora e nei pasti che modifichi. I pasti salvati e le registrazioni passate restano invariati. Per usare un intero vasetto modifica i grammi del pasto in base al peso in confezione.'));
+    h('p', { class: 'helper' }, 'I nuovi valori si usano nei piani creati da ora e nei pasti che modifichi. I pasti già pianificati mantengono i valori precedenti finché non scegli di aggiornarli. Per usare un intero vasetto modifica i grammi del pasto in base al peso in confezione.'));
   form.addEventListener('submit', event => {
     event.preventDefault(); if (!form.reportValidity()) return;
     try {
       const values = new FormData(form);
       const next = clone(data);
       next.foodOverrides[labelFoodId] = Object.fromEntries(['kcal', 'protein', 'carbs', 'fat'].map(key => [key, Number(values.get(key))]));
-      getFood(labelFoodId, next.foodOverrides); persist(next); render(); notify('Etichetta salvata per i nuovi piani.');
+      getFood(labelFoodId, next.foodOverrides); persist(next); render(); if (!unsaved) notify('Etichetta salvata per i nuovi piani.');
     } catch (error) { formError.textContent = error.message; }
   });
   return h('div', { class: 'page foods-page' }, pageTitle('QUELLO CHE MANGI', 'Alimenti e quantità.', 'Pesi chiari e valori per 100 g. La confezione che hai in mano è il riferimento.'),
-    h('section', { class: 'panel label-panel' }, h('div', { class: 'section-heading' }, h('div', {}, h('p', { class: 'eyebrow' }, 'DALLA TUA CONFEZIONE'), h('h2', {}, 'Personalizza l’etichetta'), h('p', {}, 'Scegli un alimento e copia i valori per 100 g della tua confezione.'))), form),
+    h('section', { class: 'panel label-panel' }, h('div', { class: 'section-heading' }, h('div', {}, h('p', { class: 'eyebrow' }, 'IL RIFERIMENTO PER OGNI VARIANTE'), h('h2', {}, 'Etichette e valori nutrizionali'), h('p', {}, 'I valori delle varianti sono già inseriti. Puoi modificarli facoltativamente per una confezione diversa.'))), form),
+    h('section', { class: 'panel refresh-panel' }, h('div', {}, h('h2', {}, 'Hai già pianificato i prossimi pasti?'), h('p', {}, 'Puoi aggiornarne i valori nutrizionali e le note di riferimento senza cambiare i grammi. I pasti mangiati, i giorni passati e le tue etichette personali restano invariati.')),
+      button('Aggiorna i pasti da oggi in poi', refreshPlannedMeals, 'button secondary', { disabled: Boolean(storageReadError || storageConflict) })),
     h('div', { class: 'section-heading' }, h('div', {}, h('h2', {}, 'Il catalogo del piano'), h('p', {}, 'Energia e macronutrienti per 100 g di parte edibile.'))),
     h('div', { class: 'food-catalog' }, ...FOODS.map(base => {
       const item = getFood(base.id, data.foodOverrides);
-      return h('article', { class: 'food-card' }, h('div', { class: 'food-card-top' }, h('h3', {}, item.name), (data.foodOverrides[item.id] || item.estimated) && h('span', { class: 'estimate-tag' }, data.foodOverrides[item.id] ? 'Tua etichetta' : 'Stima')),
+      return h('article', { class: 'food-card' }, h('div', { class: 'food-card-top' }, h('h3', {}, item.name), foodStatus(item)),
         h('p', { class: 'food-calories' }, h('strong', {}, round(item.kcal)), ' kcal'),
         h('p', { class: 'food-macros' }, `P ${formatDecimal(item.protein)} g · C ${formatDecimal(item.carbs)} g · G ${formatDecimal(item.fat)} g`),
-        h('p', { class: 'helper' }, item.unitNote), h('p', { class: 'food-source' }, /^https?:\/\//.test(item.source) ? h('a', { href: item.source, target: '_blank', rel: 'noopener noreferrer' }, 'Consulta la fonte ↗') : item.source));
+        h('p', { class: 'helper' }, item.unitNote), labelReference(item),
+        item.source !== item.label?.evidenceUrl && h('p', { class: 'food-source' }, /^https?:\/\//.test(item.source) ? h('a', { href: item.source, target: '_blank', rel: 'noopener noreferrer' }, item.label ? 'Scheda prodotto e provenienza ↗' : 'Consulta la fonte ↗') : item.source));
     })));
 }
 
@@ -471,8 +558,8 @@ function renderMethod() {
       h('p', {}, 'Pasta, riso e couscous si pesano a secco; carne e pesce a crudo senza scarti; tonno sgocciolato. Pane, yogurt e dessert si pesano come consumati. Contano anche tutto l’olio e il cioccolato utilizzati.'),
       h('p', {}, 'Le calorie e i macronutrienti del pasto sono la somma degli ingredienti nei grammi indicati. Sono incluse anche le proteine di pasta, avena e lenticchie. L’energia delle fonti può differire dalla semplice somma delle calorie dei tre macronutrienti.'),
       h('h3', {}, 'Pasta di lenticchie, budino e mousse Lidl'),
-      h('p', {}, 'I valori iniziali sono stime da prodotti analoghi, non etichette italiane Lidl verificate. Anche il vasetto da 200 g è solo un esempio: controlla il tuo formato e modifica i grammi del pasto.'),
-      h('p', {}, 'Trascrivi tutti e quattro i valori per 100 g dalla confezione in ', h('a', { href: '#foods' }, 'Alimenti'), '. I valori salvati si applicano ai nuovi piani e ai pasti che modifichi, senza riscrivere lo storico.')),
+      h('p', {}, 'Il catalogo distingue la pasta secca da quella fresca e le diverse varianti dei dessert. Le schede con il badge “Etichetta verificata” riportano formato, mercato, data di verifica, EAN quando disponibile e un collegamento all’etichetta. Usa la scheda che corrisponde alla tua confezione: gusti e formati diversi possono avere valori diversi.'),
+      h('p', {}, 'Le varianti verificate hanno già i valori per 100 g in ', h('a', { href: '#foods' }, 'Alimenti'), '. Per una confezione diversa puoi personalizzarli: è facoltativo. Le modifiche si applicano ai nuovi piani e ai pasti che modifichi, senza riscrivere lo storico.')),
     h('section', { class: 'panel method-panel' }, h('h2', {}, 'Come leggere il diario'), h('dl', { class: 'method-definitions' },
       h('dt', {}, 'Obiettivo stimato'), h('dd', {}, 'Il riferimento giornaliero calcolato con il profilo salvato per quella data.'),
       h('dt', {}, 'Pianificato'), h('dd', {}, 'La somma dei pasti del giorno, escluso il preallenamento se lo salti.'),

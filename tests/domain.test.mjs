@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ACTIVITY_LEVELS, calculateTargets, sumMacros } from '../src/nutrition.js';
-import { FOODS, getFood, foodMacros } from '../src/foods.js';
+import { FOODS, LIDL_FOOD_IDS, getFood, foodMacros } from '../src/foods.js';
 import { MEAL_SLOTS, createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } from '../src/planner.js';
 
 const profile = { age: 35, sex: 'male', weight: 80, height: 180, activity: 'moderate', goal: 'lose', trainingTime: '06:00', trainingDays: [1, 3, 5], specialCondition: false };
@@ -61,7 +61,7 @@ test('underweight does not receive a deficit and extreme results are finite and 
 });
 
 test('catalog has all required unique IDs, complete sources and edible-weight notes', () => {
-  const required = ['pasta', 'rice', 'couscous', 'potatoes', 'lentil-pasta-lidl', 'chicken', 'eggs', 'egg-whites', 'salmon', 'tuna', 'pork-tenderloin', 'olive-oil', 'vegetables', 'banana', 'rice-cakes', 'jam', 'oats', 'greek-yogurt', 'bread', 'protein-pudding-lidl', 'protein-mousse-lidl', 'dark-chocolate'];
+  const required = ['pasta', 'rice', 'couscous', 'potatoes', 'lentil-pasta-lidl', 'lentil-pasta-lidl-fresh', 'chicken', 'eggs', 'egg-whites', 'salmon', 'tuna', 'pork-tenderloin', 'olive-oil', 'vegetables', 'banana', 'rice-cakes', 'jam', 'oats', 'greek-yogurt', 'bread', 'protein-pudding-lidl', 'protein-pudding-lidl-vanilla', 'protein-mousse-lidl', 'protein-mousse-lidl-vanilla', 'dark-chocolate'];
   assert.equal(new Set(FOODS.map(food => food.id)).size, FOODS.length);
   for (const id of required) {
     const food = getFood(id);
@@ -70,15 +70,25 @@ test('catalog has all required unique IDs, complete sources and edible-weight no
   }
   assert.match(getFood('tuna').unitNote, /sgocciolat/);
   assert.match(getFood('eggs').unitNote, /50 g/);
-  for (const id of ['lentil-pasta-lidl', 'protein-pudding-lidl', 'protein-mousse-lidl']) {
-    assert.equal(getFood(id).estimated, true);
-    assert.match(getFood(id).unitNote, /non verificata/);
+  assert.deepEqual(LIDL_FOOD_IDS, FOODS.filter(item => item.label).map(item => item.id));
+  assert.equal(LIDL_FOOD_IDS.length, 6);
+  for (const id of LIDL_FOOD_IDS) {
+    assert.equal(getFood(id).estimated, false);
+    assert.equal(getFood(id).label.verifiedOn, '2026-10-23');
+    assert.equal(getFood(id).label.market, 'Italia');
+    assert.ok(getFood(id).label.packGrams > 0);
+    assert.match(getFood(id).label.evidenceUrl, /^https:\/\//);
   }
+  assert.equal(getFood('protein-pudding-lidl').label.barcode, undefined);
+  assert.match(getFood('lentil-pasta-lidl-fresh').unitNote, /Peso fresco/);
 });
 
 test('all four macros scale linearly, including protein in dry lentil pasta', () => {
   const lentil = foodMacros('lentil-pasta-lidl', 80);
-  assert.deepEqual(lentil, { kcal: 267.2, protein: 20.8, carbs: 40, fat: 1.36 });
+  assert.deepEqual(lentil, { kcal: 268, protein: 20.8, carbs: 40, fat: 1.36 });
+  assert.deepEqual(foodMacros('lentil-pasta-lidl-fresh', 200), { kcal: 518, protein: 38, carbs: 78, fat: 2 });
+  close(foodMacros('protein-pudding-lidl', 200).kcal, 166);
+  close(foodMacros('protein-mousse-lidl', 175).kcal, 150.5);
   const egg = foodMacros('eggs', 100);
   close(egg.protein, 12.4);
   assert.deepEqual(foodMacros('pasta', 0), { kcal: 0, protein: 0, carbs: 0, fat: 0 });
@@ -160,9 +170,12 @@ test('at least three practical breakfast and preworkout alternatives include all
   const breakfasts = mealAlternatives(plan[1], targets);
   assert.ok(snacks.length >= 3 && breakfasts.length >= 3);
   for (const meal of [...snacks, ...breakfasts]) checkMeal(meal);
-  for (const id of ['protein-pudding-lidl', 'protein-mousse-lidl', 'dark-chocolate']) assert.ok(breakfasts.some(meal => meal.ingredients.some(item => item.foodId === id)));
-  const pudding = breakfasts.find(meal => grams(meal, 'protein-pudding-lidl'));
-  close(grams(pudding, 'protein-pudding-lidl'), 200);
+  for (const id of ['protein-pudding-lidl', 'protein-pudding-lidl-vanilla', 'protein-mousse-lidl', 'protein-mousse-lidl-vanilla']) {
+    const breakfast = breakfasts.find(meal => grams(meal, id));
+    assert.ok(breakfast);
+    close(grams(breakfast, id), getFood(id).label.packGrams);
+  }
+  assert.equal(new Set(breakfasts.map(meal => meal.title)).size, breakfasts.length);
   assert.ok(breakfasts.some(meal => grams(meal, 'greek-yogurt') && grams(meal, 'dark-chocolate')));
 });
 
@@ -170,8 +183,8 @@ test('main alternatives cover every requested carb and protein with full macro t
   const targets = calculateTargets(profile);
   const main = makeMeal([{ foodId: 'pasta', grams: 100 }, { foodId: 'chicken', grams: 150 }, { foodId: 'vegetables', grams: 200 }, { foodId: 'olive-oil', grams: 15 }]);
   const alternatives = mealAlternatives(main, targets);
-  assert.equal(alternatives.length, 30);
-  for (const id of ['pasta', 'rice', 'couscous', 'potatoes', 'lentil-pasta-lidl', 'chicken', 'eggs', 'egg-whites', 'salmon', 'tuna', 'pork-tenderloin']) assert.ok(alternatives.some(meal => grams(meal, id) > 0), id);
+  assert.equal(alternatives.length, 36);
+  for (const id of ['pasta', 'rice', 'couscous', 'potatoes', 'lentil-pasta-lidl', 'lentil-pasta-lidl-fresh', 'chicken', 'eggs', 'egg-whites', 'salmon', 'tuna', 'pork-tenderloin']) assert.ok(alternatives.some(meal => grams(meal, id) > 0), id);
   for (const meal of alternatives) {
     checkMeal(meal);
     assert.equal(meal.id, main.id);
@@ -218,13 +231,13 @@ test('two eggs with whites are practical and consecutive swaps remove previous c
   close(tuna.macros.protein, main.macros.protein);
 });
 
-test('extreme label overrides remain bounded and advertise tradeoffs without zero portions', () => {
+test('extreme label overrides remain bounded and preserve protein without zero portions', () => {
   const main = makeMeal([{ foodId: 'rice', grams: 100 }, { foodId: 'chicken', grams: 150 }, { foodId: 'vegetables', grams: 200 }, { foodId: 'olive-oil', grams: 15 }]);
   const overrides = { 'lentil-pasta-lidl': { kcal: 400, protein: 60, carbs: 20, fat: 9 } };
   const alternative = swapMealFood(main, 'rice', 'lentil-pasta-lidl', overrides);
   checkMeal(alternative, overrides);
   assert.ok(grams(alternative, 'chicken') >= 50);
-  assert.match(alternative.note, /discostarsi/);
+  close(alternative.macros.protein, main.macros.protein);
   assert.throws(() => swapMealFood(main, 'rice', 'lentil-pasta-lidl', { 'lentil-pasta-lidl': { kcal: 0, protein: 0, carbs: 0, fat: 0 } }), /Controlla le etichette/);
 });
 
@@ -267,9 +280,8 @@ test('ordinary adult plans stay within 5% of energy targets across goals, dates 
 });
 
 test('lentils and eggs get an explicit counted bread side when energy is short', () => {
-  const person = { ...profile, age: 30, weight: 75, height: 178, goal: 'maintain' };
-  const meals = createDayPlan(person, calculateTargets(person), '2026-10-23');
-  const lunch = meals.find(meal => meal.slot === 'lunch');
+  const main = makeMeal([{ foodId: 'rice', grams: 120 }, { foodId: 'chicken', grams: 110 }, { foodId: 'vegetables', grams: 200 }, { foodId: 'olive-oil', grams: 25 }]);
+  const lunch = mealAlternatives(main).find(meal => grams(meal, 'lentil-pasta-lidl') && grams(meal, 'eggs'));
   assert.ok(grams(lunch, 'lentil-pasta-lidl') > 0 && grams(lunch, 'eggs') > 0);
   assert.ok(grams(lunch, 'bread') > 0);
   assert.equal(grams(lunch, 'egg-whites'), 0);
@@ -277,4 +289,61 @@ test('lentils and eggs get an explicit counted bread side when energy is short',
   assert.doesNotMatch(lunch.note, /albumi indicati/);
   assert.match(lunch.note, /pane a parte/);
   checkMeal(lunch);
+});
+
+test('dry and fresh lentil swaps preserve all protein at the chicken minimum, including bread', () => {
+  const per100 = { pasta: 13.5, chicken: 23.3, vegetables: 1.5, 'olive-oil': 0, bread: 8.5, 'lentil-pasta-lidl': 26, 'lentil-pasta-lidl-fresh': 19 };
+  for (const [pasta, chicken] of [[80, 170], [100, 100], [120, 130]]) {
+    const main = makeMeal([{ foodId: 'pasta', grams: pasta }, { foodId: 'chicken', grams: chicken }, { foodId: 'vegetables', grams: 200 }, { foodId: 'olive-oil', grams: 10 }]);
+    const targetProtein = pasta * 0.135 + chicken * 0.233 + 3;
+    for (const id of ['lentil-pasta-lidl', 'lentil-pasta-lidl-fresh']) {
+      const swapped = swapMealFood(main, 'pasta', id);
+      const independentProtein = swapped.ingredients.reduce((total, item) => total + item.grams * per100[item.foodId] / 100, 0);
+      close(independentProtein, targetProtein);
+      close(swapped.macros.protein, targetProtein);
+      assert.ok(grams(swapped, 'chicken') < chicken);
+      assert.ok(grams(swapped, 'chicken') >= 50 - 1e-8);
+      if (pasta >= 100) assert.ok(grams(swapped, 'bread') > 0);
+      if (id.endsWith('-fresh')) assert.ok(grams(swapped, id) >= 50 && grams(swapped, id) <= 300);
+      checkMeal(swapped);
+    }
+  }
+});
+
+test('consecutive swaps rebalance bread without duplicate ingredients or protein drift', () => {
+  let meal = makeMeal([{ foodId: 'pasta', grams: 100 }, { foodId: 'chicken', grams: 100 }, { foodId: 'vegetables', grams: 200 }, { foodId: 'olive-oil', grams: 10 }]);
+  const targetProtein = 13.5 + 23.3 + 3;
+  for (const [oldId, newId] of [['pasta', 'lentil-pasta-lidl'], ['lentil-pasta-lidl', 'rice'], ['rice', 'lentil-pasta-lidl-fresh'], ['lentil-pasta-lidl-fresh', 'pasta']]) {
+    meal = swapMealFood(meal, oldId, newId);
+    assert.equal(new Set(meal.ingredients.map(item => item.foodId)).size, meal.ingredients.length);
+    assert.ok(grams(meal, 'bread') <= 150);
+    close(meal.macros.protein, targetProtein);
+    checkMeal(meal);
+  }
+});
+
+test('impossible protein targets produce a specific warning rather than false equivalence', () => {
+  const tiny = makeMeal([{ foodId: 'rice', grams: 10 }, { foodId: 'chicken', grams: 1 }, { foodId: 'vegetables', grams: 200 }]);
+  const swapped = swapMealFood(tiny, 'rice', 'lentil-pasta-lidl-fresh');
+  assert.ok(swapped.macros.protein > tiny.macros.protein);
+  assert.match(swapped.note, /Proteine: .*rispetto a .*impedisce l’equivalenza esatta/);
+});
+
+test('verified label values retain each recipe and the 100 g basis independently of pack size', () => {
+  const expected = {
+    'lentil-pasta-lidl': [335, 26, 50, 1.7, 250],
+    'lentil-pasta-lidl-fresh': [259, 19, 39, 1, 200],
+    'protein-pudding-lidl': [83, 10.1, 6.5, 1.5, 200],
+    'protein-pudding-lidl-vanilla': [75, 10, 5.2, 1.5, 200],
+    'protein-mousse-lidl': [86, 10, 5.8, 2.2, 175],
+    'protein-mousse-lidl-vanilla': [76, 10, 5.8, 1.4, 175],
+  };
+  for (const [id, values] of Object.entries(expected)) {
+    const item = getFood(id);
+    assert.deepEqual([item.kcal, item.protein, item.carbs, item.fat, item.label.packGrams], values);
+    assert.ok(Object.isFrozen(item.label));
+    const portion = foodMacros(id, item.label.packGrams);
+    close(portion.protein, values[1] * values[4] / 100);
+    close(portion.kcal, values[0] * values[4] / 100);
+  }
 });

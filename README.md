@@ -10,11 +10,15 @@ Il diario mostra obiettivo stimato, quantità pianificate e quantità consumate.
 
 Le alternative comprendono i carboidrati richiesti (pasta, riso, couscous, patate e pasta di lenticchie), pollo, uova, albumi, salmone, tonno e filetto di maiale. Le colazioni includono budino e mousse proteici, yogurt greco con cioccolato fuso e altre proposte.
 
-Le schede Lidl partono da **stime di prodotti analoghi**, non da etichette Lidl verificate. In **Alimenti** puoi trascrivere i valori per 100 g della confezione; nel pasto puoi impostare il peso del vasetto. I pesi sono della parte edibile a crudo o secco, salvo le note del singolo alimento.
+Le schede Lidl identificano le confezioni verificate: sedanini secchi Combino, fusilli freschi Nonna Mia, budini Milbona cacao e vaniglia da 200 g, mousse Milbona cioccolato e vaniglia da 175 g. In **Alimenti** trovi i valori per 100 g, la data di verifica e il collegamento alla fotografia dell’etichetta. Ogni voce si riferisce alla variante indicata; la modifica manuale è facoltativa per confezioni diverse. La pasta fresca si pesa prima della cottura, senza convertirla in peso secco.
+
+Quando cambi il carboidrato di pranzo o cena, il piano adatta anche carne, pesce o uova e mostra le porzioni prima e dopo la scelta. Le proteine della pasta di lenticchie e degli altri ingredienti contribuiscono già al totale.
 
 ## Dati personali
 
 [storage.js](src/storage.js) salva il profilo, le etichette personalizzate e il diario nella chiave `pasti.data.v1` del `localStorage`. Ogni giorno conserva il profilo e i pasti usati per quella data. Le registrazioni conservano un’istantanea dei valori al momento del consumo: un cambiamento del profilo o delle etichette non riscrive lo storico.
+
+Il comando **Aggiorna i pasti da oggi in poi**, nella sezione Alimenti, applica il catalogo corrente ai pasti pianificati non ancora consumati, dopo una conferma. Mantiene ingredienti, grammi ed eventuali valori personalizzati; lascia invariati i giorni passati e le registrazioni dei pasti mangiati.
 
 In **Profilo** puoi esportare o importare un backup JSON e cancellare i dati locali. L’importazione valida il file e chiede conferma prima di sostituire l’archivio. Il limite del backup è 5 MiB. Un conflitto fra schede blocca il salvataggio del modello obsoleto e richiede il ricaricamento.
 

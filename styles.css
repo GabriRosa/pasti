@@ -195,16 +195,29 @@ main:focus { outline: none; }
 .notice.danger { background: #fcf0eb; border-color: #dbb8aa; color: #7c3028; }
 .notice.compact { font-size: .74rem; padding: 12px 16px; margin: 12px 0; }
 .label-panel { margin-bottom: 35px; }
+.refresh-panel { display: flex; align-items: center; gap: 25px; margin-bottom: 35px; }
+.refresh-panel h2 { font-size: 1.1rem; }
+.refresh-panel p { font-size: .78rem; color: var(--ink-soft); margin: 0; }
+.refresh-panel .button { flex: none; }
 .label-form { max-width: 800px; }
 .label-form > .field { max-width: 500px; }
 .label-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 15px; }
 .food-estimate-note { font-size: .79rem; padding: 13px 16px; background: #f1f2e8; border-radius: 10px; margin: 0 0 23px; }
+.food-estimate-note > p { margin: 10px 0 0; }
 .form-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 20px; }
 .food-catalog { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 15px; }
 .food-card { border: 1px solid var(--line); background: var(--paper); border-radius: 17px; padding: 23px; overflow-wrap: anywhere; }
 .food-card-top { display: flex; align-items: start; gap: 8px; }
 .food-card h3 { font-size: 1rem; margin-bottom: 16px; }
-.estimate-tag { font-size: .57rem; background: #eef0e2; padding: 4px 7px; border-radius: 6px; color: #526347; white-space: nowrap; margin-left: auto; }
+.estimate-tag { display: inline-block; font-size: .57rem; background: #eef0e2; padding: 4px 7px; border-radius: 6px; color: #526347; white-space: nowrap; margin-left: auto; }
+.verified-tag { background: #e1ebd0; color: #285138; }
+.label-reference { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 12px; font-size: .67rem; color: var(--ink-soft); }
+.label-reference p { margin: 0 0 3px; }
+.label-reference a { display: inline-block; margin-top: 5px; }
+.label-reference .label-reference-caption { margin-bottom: 8px; }
+.barcode { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.food-card-top { flex-wrap: wrap; }
+.food-card-top .estimate-tag { margin-left: 0; margin-bottom: 12px; }
 .food-calories { font-size: .7rem; margin-bottom: 6px; }
 .food-calories strong { font-size: 1.5rem; font-weight: 550; }
 .food-macros { font-size: .73rem; color: var(--ink-soft); margin-bottom: 8px; }
@@ -237,6 +250,13 @@ dialog::backdrop { background: #14251b77; backdrop-filter: blur(3px); }
 .dialog-heading p { margin: 0; font-size: .8rem; color: var(--ink-soft); }
 .dialog-heading .icon-button { flex: none; }
 .swap-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.swap-explanation { font-size: .74rem; color: var(--ink-soft); line-height: 1.6; margin: -5px 0 20px; }
+.portion-update { background: #edf2df; border: 1px solid #d5e0be; border-radius: 12px; padding: 15px 17px; margin: 0 0 18px; font-size: .76rem; }
+.portion-update[hidden] { display: none; }
+.portion-update > strong { font-weight: 620; }
+.portion-update ul { list-style: none; padding: 0; margin: 9px 0 0; }
+.portion-update li { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 4px 0; }
+.portion-update .portion-change { text-align: right; flex: none; font-variant-numeric: tabular-nums; }
 .edit-ingredient { display: flex; align-items: center; justify-content: space-between; gap: 17px; padding: 17px 0; border-top: 1px solid var(--line); }
 .edit-ingredient label { font-size: .87rem; font-weight: 580; display: block; }
 .edit-ingredient small { display: block; color: var(--ink-soft); margin-top: 3px; font-size: .7rem; max-width: 42ch; }
@@ -371,6 +391,7 @@ dialog::backdrop { background: #14251b77; backdrop-filter: blur(3px); }
   .day-option > span { font-size: .66rem; min-height: 44px; }
   .condition-check { font-size: .74rem; }
   .profile-side { display: flex; }
+  .refresh-panel { flex-direction: column; align-items: stretch; gap: 18px; }
   .onboarding-aside { padding: 20px 7px; gap: 0 20px; grid-template-columns: 85px 1fr; }
   .leaf-mark { width: 85px; height: 85px; font-size: 3.2rem; }
   .onboarding-aside h2 { font-size: 1.45rem; }
@@ -394,6 +415,8 @@ dialog::backdrop { background: #14251b77; backdrop-filter: blur(3px); }
   .dialog-heading p { font-size: .73rem; }
   .dialog-heading .icon-button { width: 38px; height: 38px; min-width: 38px; }
   .swap-fields { grid-template-columns: 1fr; gap: 0; }
+  .portion-update { padding: 14px; font-size: .7rem; }
+  .portion-update li { flex-wrap: wrap; gap: 2px 10px; }
   .edit-ingredient { gap: 10px; }
   .edit-ingredient label { font-size: .79rem; }
   .edit-ingredient small { font-size: .63rem; }

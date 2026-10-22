@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { calculateTargets, sumMacros } from '../src/nutrition.js';
-import { FOODS, foodMacros } from '../src/foods.js';
+import { FOODS, LIDL_FOOD_IDS, getFood, foodMacros } from '../src/foods.js';
 import { createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } from '../src/planner.js';
 import {
   STORAGE_KEY, SCHEMA_VERSION, MAX_BACKUP_BYTES, createEmptyData,
@@ -575,4 +575,320 @@ test('dates before the Unix epoch within the planner range still generate persis
     const data = generatedDiary(dateKey);
     assert.deepEqual(parseBackup(exportBackup(data)), data);
   }
+});
+
+function dateOffset(key, days) {
+  const date = new Date(`${key}T12:00:00`); date.setDate(date.getDate() + days);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function pastaAndChickenDiary() {
+  const key = todayKey();
+  const data = generatedDiary(key);
+  const lunch = data.days[key].meals.find(item => item.slot === 'lunch');
+  data.days[key].meals = data.days[key].meals.map(item => item.id === lunch.id ? mealFromIngredients({
+    ...lunch, ingredients: [{ foodId: 'pasta', grams: 80 }, { foodId: 'chicken', grams: 170 },
+      { foodId: 'vegetables', grams: 200 }, { foodId: 'olive-oil', grams: 10 }],
+  }) : item);
+  return { data, key, lunchId: lunch.id };
+}
+
+function openMeal(document, data, key, id) {
+  const index = data.days[key].meals.findIndex(item => item.id === id);
+  document.querySelectorAll('.meal-card')[index].querySelector('.meal-actions button').click();
+}
+
+test('pasta-to-lentil UI swap shows the lower chicken portion and counts every protein source', async t => {
+  const { data, key, lunchId } = pastaAndChickenDiary();
+  const original = data.days[key].meals.find(item => item.id === lunchId);
+  const store = new MemoryStorage(); saveData(data, store);
+  const { document } = await bootApp(t, store);
+  openMeal(document, data, key, lunchId);
+  const select = document.querySelector('.swap-fields select');
+  select.value = 'lentil-pasta-lidl'; select.dispatch('change');
+  const expected = swapMealFood(original, 'pasta', 'lentil-pasta-lidl');
+  const chicken = expected.ingredients.find(item => item.foodId === 'chicken');
+  assert.ok(chicken.grams < 170);
+  const comparison = document.querySelector('.portion-update');
+  assert.equal(comparison.hidden, false);
+  assert.equal(comparison.attributes['aria-live'], 'polite');
+  const chickenRow = comparison.querySelectorAll('li').find(row => row.children[0].textContent === getFood('chicken').name);
+  assert.ok(chickenRow, 'The adapted chicken portion must be included in the comparison');
+  const portion = document.querySelectorAll('.edit-ingredients input').find(input => input.attributes['aria-label'] === `${getFood('chicken').name}, grammi`);
+  assert.equal(portion.valueAsNumber, Number(chicken.grams.toFixed(1)));
+  assert.equal(store.writes, 1, 'Changing the draft must not persist before Save');
+  document.querySelector('.dialog-actions button.primary').click();
+  const result = loadData(store).data.days[key].meals.find(item => item.id === lunchId);
+  assert.deepEqual(result, expected);
+  const protein = result.ingredients.reduce((sum, item) => sum + foodMacros(item.foodId, item.grams).protein, 0);
+  assert.ok(protein > foodMacros('chicken', chicken.grams).protein);
+  assertMacrosClose(result.macros, sumMacros(result.ingredients.map(item => foodMacros(item.foodId, item.grams))));
+});
+
+test('manual portion edits clear the previous swap comparison and Cancel writes nothing', async t => {
+  const { data, key, lunchId } = pastaAndChickenDiary();
+  const store = new MemoryStorage(); saveData(data, store);
+  const initialJSON = store.getItem(STORAGE_KEY);
+  const { document } = await bootApp(t, store);
+  openMeal(document, data, key, lunchId);
+  const select = document.querySelector('.swap-fields select');
+  select.value = 'lentil-pasta-lidl'; select.dispatch('change');
+  assert.equal(document.querySelector('.portion-update').hidden, false);
+  const portion = document.querySelector('.edit-ingredients input');
+  portion.value = '120'; portion.dispatch('input');
+  assert.equal(document.querySelector('.portion-update').hidden, true);
+  document.querySelector('.dialog-actions button.secondary').click();
+  assert.equal(store.getItem(STORAGE_KEY), initialJSON);
+  assert.equal(store.writes, 1);
+});
+
+function refreshFixture() {
+  const key = todayKey();
+  const pastKey = dateOffset(key, -1);
+  const futureKey = dateOffset(key, 1);
+  const data = generatedDiary(key);
+  data.days[pastKey] = generatedDiary(pastKey).days[pastKey];
+  data.days[futureKey] = generatedDiary(futureKey).days[futureKey];
+  for (const current of Object.values(data.days)) for (const item of current.meals) item.note = 'Nota del diario da conservare.';
+  data.foodOverrides['protein-pudding-lidl'] = { kcal: 95, protein: 12, carbs: 7, fat: 2.1 };
+  const today = data.days[key];
+  const consumed = today.meals.find(item => item.slot === 'breakfast');
+  consumed.macros = Object.fromEntries(Object.entries(consumed.macros).map(([metric, value]) => [metric, value * 0.8]));
+  today.consumed[consumed.id] = { consumedAt: new Date().toISOString(), meal: clone(consumed) };
+  today.skipped = [today.meals.find(item => item.slot === 'preworkout').id];
+  const lunch = today.meals.find(item => item.slot === 'lunch');
+  lunch.macros = Object.fromEntries(Object.entries(lunch.macros).map(([metric, value]) => [metric, value * 0.8]));
+  const future = data.days[futureKey];
+  const breakfast = future.meals.find(item => item.slot === 'breakfast');
+  const pudding = mealAlternatives(breakfast, future.targets, data.foodOverrides).find(item => item.ingredients.some(ingredient => ingredient.foodId === 'protein-pudding-lidl'));
+  pudding.note = 'Nota del diario da conservare.';
+  pudding.macros = Object.fromEntries(Object.entries(pudding.macros).map(([metric, value]) => [metric, value * 0.8]));
+  future.meals = future.meals.map(item => item.id === breakfast.id ? pudding : item);
+  const past = data.days[pastKey].meals[0];
+  past.macros = Object.fromEntries(Object.entries(past.macros).map(([metric, value]) => [metric, value * 0.8]));
+  return { data, key, pastKey, futureKey, changedIds: [lunch.id, pudding.id] };
+}
+
+test('refresh updates only eligible macros, respects overrides and preserves grams and history', async t => {
+  const { data, key, pastKey, futureKey, changedIds } = refreshFixture();
+  const store = new MemoryStorage(); saveData(data, store);
+  const initialJSON = store.getItem(STORAGE_KEY);
+  const { document } = await bootApp(t, store, 'foods');
+  document.querySelector('.refresh-panel button').click();
+  assert.equal(document.querySelector('#app-dialog').open, true);
+  assert.equal(store.getItem(STORAGE_KEY), initialJSON);
+  document.querySelector('.dialog-actions button.primary').click();
+  const result = loadData(store).data;
+  const expected = clone(data);
+  for (const date of [key, futureKey]) {
+    for (const item of expected.days[date].meals) {
+      if (changedIds.includes(item.id)) item.macros = mealFromIngredients(item, expected.foodOverrides).macros;
+    }
+    assert.notEqual(result.days[date].updatedAt, data.days[date].updatedAt);
+    expected.days[date].updatedAt = result.days[date].updatedAt;
+  }
+  assert.deepEqual(result, expected);
+  assert.deepEqual(result.days[pastKey], data.days[pastKey]);
+  const pudding = result.days[futureKey].meals.find(item => changedIds.includes(item.id));
+  assertMacrosClose(pudding.macros, mealFromIngredients(pudding, data.foodOverrides).macros);
+  assert.equal(store.writes, 2, 'The approved refresh must use one atomic replacement');
+});
+
+test('refresh cancellation and a later no-op leave storage untouched', async t => {
+  const { data } = refreshFixture();
+  const store = new MemoryStorage(); saveData(data, store);
+  const initialJSON = store.getItem(STORAGE_KEY);
+  const { document } = await bootApp(t, store, 'foods');
+  document.querySelector('.refresh-panel button').click();
+  document.querySelector('.dialog-actions button.secondary').click();
+  assert.equal(store.getItem(STORAGE_KEY), initialJSON);
+  assert.equal(store.writes, 1);
+  document.querySelector('.refresh-panel button').click();
+  document.querySelector('.dialog-actions button.primary').click();
+  const afterUpdate = store.getItem(STORAGE_KEY);
+  document.querySelector('.refresh-panel button').click();
+  assert.equal(document.querySelector('#app-dialog').open, false);
+  assert.equal(store.getItem(STORAGE_KEY), afterUpdate);
+  assert.equal(store.writes, 2);
+});
+
+test('a cross-tab conflict between refresh preview and confirmation cannot replace newer data', async t => {
+  const { data } = refreshFixture();
+  const store = new MemoryStorage(); saveData(data, store);
+  const { document, window } = await bootApp(t, store, 'foods');
+  document.querySelector('.refresh-panel button').click();
+  const external = loadData(store).data;
+  external.profile.weight = 79;
+  saveData(external, store);
+  const latestJSON = store.getItem(STORAGE_KEY);
+  window.dispatch('storage', { key: STORAGE_KEY });
+  document.querySelector('.dialog-actions button.primary').click();
+  assert.equal(store.getItem(STORAGE_KEY), latestJSON);
+  assert.equal(store.writes, 2);
+});
+
+test('refresh confirms obsolete reference notes and preserves consumed notes and current macros', async t => {
+  const { data, key, lunchId } = pastaAndChickenDiary();
+  const lunch = data.days[key].meals.find(item => item.id === lunchId);
+  const lentil = swapMealFood(lunch, 'pasta', 'lentil-pasta-lidl');
+  lentil.note = 'Nota precedente. Valori Lidl da verificare sulla confezione.';
+  data.days[key].meals = data.days[key].meals.map(item => item.id === lunchId ? lentil : item);
+  for (const item of data.days[key].meals) if (item.id !== lunchId) item.note = 'Nota da conservare.';
+  const breakfast = data.days[key].meals.find(item => item.slot === 'breakfast');
+  const pudding = mealAlternatives(breakfast, data.days[key].targets).find(item => item.ingredients.some(ingredient => ingredient.foodId === 'protein-pudding-lidl'));
+  pudding.note = 'Un vasetto da 200 g è solo un esempio: modifica grammi e valori con la confezione.';
+  data.days[key].meals = data.days[key].meals.map(item => item.id === breakfast.id ? pudding : item);
+  data.days[key].consumed[pudding.id] = { consumedAt: new Date().toISOString(), meal: clone(pudding) };
+  const store = new MemoryStorage(); saveData(data, store);
+  const initialJSON = store.getItem(STORAGE_KEY);
+  const { document } = await bootApp(t, store, 'foods');
+  document.querySelector('.refresh-panel button').click();
+  assert.equal(document.querySelector('#app-dialog').open, true);
+  assert.equal(store.getItem(STORAGE_KEY), initialJSON);
+  document.querySelector('.dialog-actions button.secondary').click();
+  assert.equal(store.getItem(STORAGE_KEY), initialJSON);
+  assert.equal(store.writes, 1);
+  document.querySelector('.refresh-panel button').click();
+  document.querySelector('.dialog-actions button.primary').click();
+  const actual = loadData(store).data;
+  const changed = actual.days[key].meals.find(item => item.id === lunchId);
+  assert.notEqual(changed.note, lentil.note);
+  const expected = clone(data);
+  expected.days[key].meals.find(item => item.id === lunchId).note = changed.note;
+  expected.days[key].updatedAt = actual.days[key].updatedAt;
+  assert.deepEqual(actual, expected);
+  assert.deepEqual(actual.days[key].consumed, data.days[key].consumed);
+  const afterUpdate = store.getItem(STORAGE_KEY);
+  document.querySelector('.refresh-panel button').click();
+  assert.equal(document.querySelector('#app-dialog').open, false);
+  assert.equal(store.getItem(STORAGE_KEY), afterUpdate);
+  assert.equal(store.writes, 2);
+});
+
+test('a failed recalculation cannot apply the partially refreshed copy', async t => {
+  const { data, futureKey } = refreshFixture();
+  data.days[futureKey].meals.at(-1).ingredients[0].foodId = 'unknown-food';
+  const store = new MemoryStorage(); saveData(data, store);
+  const initialJSON = store.getItem(STORAGE_KEY);
+  const { document } = await bootApp(t, store, 'foods');
+  document.querySelector('.refresh-panel button').click();
+  assert.equal(document.querySelector('#app-dialog').open, false);
+  assert.equal(store.getItem(STORAGE_KEY), initialJSON);
+  assert.equal(store.writes, 1);
+});
+
+test('verified Lidl desserts have distinct label values, package sizes and evidence', () => {
+  const desserts = LIDL_FOOD_IDS.map(id => getFood(id)).filter(item => item.group === 'breakfast');
+  assert.equal(desserts.length, 4);
+  const actual = desserts.map(item => [item.kcal, item.protein, item.carbs, item.fat, item.label.packGrams]).sort((a, b) => a[0] - b[0]);
+  assert.deepEqual(actual, [[75, 10, 5.2, 1.5, 200], [76, 10, 5.8, 1.4, 175], [83, 10.1, 6.5, 1.5, 200], [86, 10, 5.8, 2.2, 175]]);
+  for (const item of desserts) {
+    assert.equal(item.estimated, false);
+    assert.equal(item.label.market, 'Italia');
+    assert.match(item.label.verifiedOn, /^\d{4}-\d{2}-\d{2}$/);
+    assert.match(item.label.evidenceUrl, /^https:\/\//);
+  }
+  const fresh = getFood('lentil-pasta-lidl-fresh');
+  const dry = getFood('lentil-pasta-lidl');
+  assert.notEqual(fresh.label.barcode, dry.label.barcode);
+  assert.equal(fresh.label.packGrams, 200);
+  assert.equal(dry.label.packGrams, 250);
+  assert.notEqual(fresh.carbs, dry.carbs);
+});
+
+test('the food form exposes each verified variant, evidence and user overrides', async t => {
+  const initial = generatedDiary(todayKey());
+  initial.foodOverrides['protein-pudding-lidl'] = { kcal: 94, protein: 13, carbs: 5, fat: 2 };
+  const store = new MemoryStorage(); saveData(initial, store);
+  const { document } = await bootApp(t, store, 'foods');
+  const formIds = new Set(document.querySelector('.label-form select').querySelectorAll('option').map(option => option.value));
+  for (const id of LIDL_FOOD_IDS) assert.ok(formIds.has(id));
+  const cards = document.querySelectorAll('.food-card');
+  for (const id of LIDL_FOOD_IDS) {
+    const food = getFood(id);
+    const card = cards.find(item => item.querySelector('h3').textContent === food.name);
+    assert.ok(card);
+    assert.equal(card.querySelector('.label-reference a').attributes.href, food.label.evidenceUrl);
+    assert.equal(Boolean(card.querySelector('.verified-tag')), id !== 'protein-pudding-lidl');
+  }
+  const product = document.querySelector('.label-form select');
+  product.value = 'protein-pudding-lidl'; product.dispatch('change');
+  for (const [key, value] of Object.entries(initial.foodOverrides['protein-pudding-lidl'])) {
+    assert.equal(document.querySelector(`input[name="${key}"]`).valueAsNumber, value);
+  }
+  assert.deepEqual(loadData(store).data, initial);
+});
+
+test('fresh lentil pasta and all four dessert variants are selectable with their label package size', async t => {
+  const { data, key, lunchId } = pastaAndChickenDiary();
+  const store = new MemoryStorage(); saveData(data, store);
+  const { document } = await bootApp(t, store);
+  openMeal(document, data, key, lunchId);
+  const carb = document.querySelector('.swap-fields select');
+  assert.ok(carb.querySelectorAll('option').some(option => option.value === 'lentil-pasta-lidl-fresh'));
+  carb.value = 'lentil-pasta-lidl-fresh'; carb.dispatch('change');
+  const freshPortion = document.querySelectorAll('.edit-ingredients input').find(input => input.attributes['aria-label'] === `${getFood('lentil-pasta-lidl-fresh').name}, grammi`);
+  assert.ok(freshPortion && freshPortion.valueAsNumber > 0);
+  document.querySelector('.dialog-actions button.secondary').click();
+  const breakfast = data.days[key].meals.find(item => item.slot === 'breakfast');
+  openMeal(document, data, key, breakfast.id);
+  const alternatives = mealAlternatives(breakfast, data.days[key].targets);
+  const variantSelect = document.querySelector('.dialog-content select');
+  const desserts = LIDL_FOOD_IDS.map(id => getFood(id)).filter(item => item.group === 'breakfast');
+  assert.equal(desserts.length, 4);
+  for (const dessert of desserts) {
+    const index = alternatives.findIndex(item => item.ingredients.some(ingredient => ingredient.foodId === dessert.id));
+    assert.ok(index >= 0, dessert.id);
+    variantSelect.value = String(index); variantSelect.dispatch('change');
+    const portion = document.querySelectorAll('.edit-ingredients input').find(input => input.attributes['aria-label'] === `${dessert.name}, grammi`);
+    assert.ok(portion, `${dessert.id}: ${JSON.stringify(document.querySelectorAll('.edit-ingredients input').map(input => input.attributes['aria-label']))}`);
+    assert.equal(portion.valueAsNumber, dessert.label.packGrams);
+  }
+  document.querySelector('.dialog-actions button.secondary').click();
+  assert.deepEqual(loadData(store).data, data);
+  assert.equal(store.writes, 1);
+});
+
+test('successive UI swaps preserve protein while rebalancing the counted bread', async t => {
+  const { data, key, lunchId } = pastaAndChickenDiary();
+  data.days[key].meals = data.days[key].meals.map(item => item.id === lunchId ? mealFromIngredients({
+    ...item, ingredients: [{ foodId: 'pasta', grams: 100 }, { foodId: 'chicken', grams: 100 },
+      { foodId: 'vegetables', grams: 200 }, { foodId: 'olive-oil', grams: 10 }],
+  }) : item);
+  const targetProtein = 13.5 + 23.3 + 3;
+  const per100 = { pasta: 13.5, rice: 6.7, chicken: 23.3, vegetables: 1.5, 'olive-oil': 0,
+    bread: 8.5, 'lentil-pasta-lidl': 26, 'lentil-pasta-lidl-fresh': 19 };
+  const store = new MemoryStorage(); saveData(data, store);
+  const { document } = await bootApp(t, store);
+  let current = data;
+  let sawBread = false;
+  for (const id of ['lentil-pasta-lidl', 'lentil-pasta-lidl-fresh', 'rice', 'pasta']) {
+    openMeal(document, current, key, lunchId);
+    const control = document.querySelector('.swap-fields select');
+    control.value = id; control.dispatch('change');
+    document.querySelector('.dialog-actions button.primary').click();
+    current = loadData(store).data;
+    const meal = current.days[key].meals.find(item => item.id === lunchId);
+    assert.ok(meal.ingredients.some(item => item.foodId === id));
+    assert.equal(new Set(meal.ingredients.map(item => item.foodId)).size, meal.ingredients.length);
+    const independentProtein = meal.ingredients.reduce((sum, item) => sum + item.grams * per100[item.foodId] / 100, 0);
+    assert.ok(Math.abs(independentProtein - targetProtein) < 1e-6);
+    assert.ok(Math.abs(meal.macros.protein - targetProtein) < 1e-6);
+    sawBread ||= meal.ingredients.some(item => item.foodId === 'bread' && item.grams > 0);
+  }
+  assert.ok(sawBread, 'This fixture exercises bread in the protein balance');
+});
+
+test('a quota failure during refresh preserves stored data and displays an unsaved error', async t => {
+  const { data } = refreshFixture();
+  const store = new MemoryStorage(); saveData(data, store);
+  const initialJSON = store.getItem(STORAGE_KEY);
+  const { document } = await bootApp(t, store, 'foods');
+  document.querySelector('.refresh-panel button').click();
+  store.setItem = () => { throw new Error('QuotaExceededError'); };
+  document.querySelector('.dialog-actions button.primary').click();
+  assert.equal(store.getItem(STORAGE_KEY), initialJSON);
+  assert.equal(store.writes, 1);
+  assert.equal(document.querySelector('#notifications').children[0].attributes.role, 'alert');
+  assert.ok(document.querySelector('.notice.danger'));
 });

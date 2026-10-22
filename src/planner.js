@@ -8,9 +8,9 @@ export const MEAL_SLOTS = Object.freeze([
   { id: 'dinner', label: 'Cena' },
 ].map(Object.freeze));
 
-const CARBS = ['pasta', 'rice', 'couscous', 'potatoes', 'lentil-pasta-lidl'];
+const CARBS = ['pasta', 'rice', 'couscous', 'potatoes', 'lentil-pasta-lidl', 'lentil-pasta-lidl-fresh'];
 const PROTEINS = ['chicken', 'eggs', 'egg-whites', 'salmon', 'tuna', 'pork-tenderloin'];
-const CARB_NAMES = { pasta: 'Pasta', rice: 'Riso', couscous: 'Couscous', potatoes: 'Patate', 'lentil-pasta-lidl': 'Pasta di lenticchie' };
+const CARB_NAMES = { pasta: 'Pasta', rice: 'Riso', couscous: 'Couscous', potatoes: 'Patate', 'lentil-pasta-lidl': 'Sedanini di lenticchie secchi', 'lentil-pasta-lidl-fresh': 'Fusilli di lenticchie freschi' };
 const PROTEIN_NAMES = { chicken: 'pollo', eggs: 'uova', 'egg-whites': 'albumi', salmon: 'salmone', tuna: 'tonno', 'pork-tenderloin': 'filetto di maiale' };
 const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
 const rotation = (value, length) => ((value % length) + length) % length;
@@ -56,7 +56,7 @@ function previewMeal(slot, title, ingredients, note, overrides, base = {}) {
 }
 
 function breakfastOptions(kcal, base, overrides) {
-  // Keep packaged desserts at one example tub; adjust the accompanying cereal.
+  // Keep packaged desserts at one labeled tub; adjust the accompanying cereal.
   const build = (title, fixed, cerealId, low, high, note) => {
     const fixedKcal = sumMacros(fixed.map(item => foodMacros(item.foodId, item.grams, overrides))).kcal;
     const cerealKcal = getFood(cerealId, overrides).kcal;
@@ -65,11 +65,17 @@ function breakfastOptions(kcal, base, overrides) {
     return previewMeal('breakfast', title, [...fixed, ingredient(cerealId, grams)], note, overrides, base);
   };
   const timing = 'Colazione dopo l’allenamento nei giorni di palestra. Orario indicativo, da adattare alla fine della seduta. ';
+  const pudding = (id, flavour) => build(`Budino Milbona ${flavour}, avena e banana`,
+    [ingredient(id, getFood(id, overrides).label.packGrams), ingredient('banana', 100), ingredient('dark-chocolate', 10)], 'oats', 20, 100,
+    timing + `3 minuti. Un vasetto da ${getFood(id, overrides).label.packGrams} g; puoi modificare la quantità. Avena secca, da mescolare o mangiare a parte.`);
+  const mousse = (id, flavour) => build(`Mousse Milbona ${flavour}, pane e confettura`,
+    [ingredient(id, getFood(id, overrides).label.packGrams), ingredient('jam', 20), ingredient('banana', 100)], 'bread', 30, 150,
+    timing + `3 minuti. Un vasetto da ${getFood(id, overrides).label.packGrams} g; puoi modificare la quantità. Pane e confettura a parte.`);
   return [
-    build('Budino proteico, avena e banana', [ingredient('protein-pudding-lidl', 200), ingredient('banana', 100), ingredient('dark-chocolate', 10)], 'oats', 20, 100,
-      timing + '3 minuti. Un vasetto da 200 g è solo un esempio: modifica grammi e valori con la confezione. Avena secca, da mescolare o mangiare a parte.'),
-    build('Mousse proteica, pane e confettura', [ingredient('protein-mousse-lidl', 200), ingredient('jam', 20), ingredient('banana', 100)], 'bread', 30, 150,
-      timing + '3 minuti. Un vasetto da 200 g è solo un esempio: verifica peso ed etichetta. Pane e confettura a parte.'),
+    pudding('protein-pudding-lidl', 'cacao'),
+    pudding('protein-pudding-lidl-vanilla', 'vaniglia'),
+    mousse('protein-mousse-lidl', 'cioccolato'),
+    mousse('protein-mousse-lidl-vanilla', 'vaniglia'),
     build('Yogurt greco con cioccolato fuso', [ingredient('greek-yogurt', 250), ingredient('dark-chocolate', 20), ingredient('banana', 100)], 'oats', 20, 100,
       timing + '5 minuti. Sciogli il cioccolato a intervalli brevi e versalo sullo yogurt; aggiungi avena e banana. Non sono previsti altri condimenti.'),
     build('Toast con uova e yogurt greco', [ingredient('eggs', 100), ingredient('greek-yogurt', 170), ingredient('olive-oil', 3)], 'bread', 40, 150,
@@ -90,39 +96,117 @@ function snackOptions(base, overrides) {
 
 function bounds(carbId, proteinId) {
   return {
-    carb: carbId === 'potatoes' ? [80, 650] : [20, 150],
+    carb: carbId === 'potatoes' ? [80, 650] : carbId === 'lentil-pasta-lidl-fresh' ? [50, 300] : [20, 150],
     protein: proteinId === 'salmon' ? [60, 250] : proteinId === 'egg-whites' ? [80, 300] : [50, 300],
   };
 }
 
-// Solve the two nutrient equations, then inspect feasible boundary solutions.
-// This keeps the protein from pasta/legumes and carbohydrate from other foods.
-function balancedPair(carb, protein, wanted, range) {
-  const c = { c: carb.carbs / 100, p: carb.protein / 100 };
-  const p = { c: protein.carbs / 100, p: protein.protein / 100 };
-  if (c.c <= 0 || p.p <= 0) throw new Error('La sostituzione richiede carboidrati nel primo alimento e proteine nel secondo. Controlla le etichette.');
-  const wc = 1 / Math.max(20, wanted.carbs) ** 2;
-  const wp = 1.5 / Math.max(15, wanted.protein) ** 2;
-  const candidates = [];
-  const add = (x, y) => {
-    if (Number.isFinite(x) && Number.isFinite(y)) candidates.push([clamp(x, ...range.carb), clamp(y, ...range.protein)]);
-  };
-  const determinant = c.c * p.p - p.c * c.p;
-  if (Math.abs(determinant) > 1e-10) {
-    add((wanted.carbs * p.p - p.c * wanted.protein) / determinant,
-      (c.c * wanted.protein - wanted.carbs * c.p) / determinant);
+const dot = (left, right) => left.reduce((total, value, index) => total + value * right[index], 0);
+
+function solveSquare(matrix, vector) {
+  const rows = matrix.map((row, index) => [...row, vector[index]]);
+  for (let col = 0; col < vector.length; col++) {
+    let pivot = col;
+    for (let row = col + 1; row < rows.length; row++) if (Math.abs(rows[row][col]) > Math.abs(rows[pivot][col])) pivot = row;
+    if (Math.abs(rows[pivot][col]) < 1e-12) return null;
+    [rows[col], rows[pivot]] = [rows[pivot], rows[col]];
+    const divisor = rows[col][col];
+    rows[col] = rows[col].map(value => value / divisor);
+    for (let row = 0; row < rows.length; row++) {
+      if (row === col) continue;
+      const multiplier = rows[row][col];
+      rows[row] = rows[row].map((value, index) => value - multiplier * rows[col][index]);
+    }
   }
-  for (const x of range.carb) {
-    const y = (wc * p.c * (wanted.carbs - c.c * x) + wp * p.p * (wanted.protein - c.p * x)) / (wc * p.c ** 2 + wp * p.p ** 2);
-    add(x, y);
+  return rows.map(row => row[vector.length]);
+}
+
+// Enumerate the bounded vertices that satisfy the nutrient equalities.
+// Amounts are normalized before solving so grams and kcal have stable scales.
+function constrainedVertices(coefficients, targets, ranges) {
+  const count = ranges.length;
+  const scales = ranges.map(range => range[1] || 1);
+  const rows = coefficients.map((row, index) => row.map((value, column) => value * scales[column] / Math.max(1, Math.abs(targets[index]))));
+  const values = targets.map(value => value / Math.max(1, Math.abs(value)));
+  const output = [];
+  for (let pattern = 0; pattern < 3 ** count; pattern++) {
+    let state = pattern;
+    const point = Array(count).fill(0);
+    const free = [];
+    for (let index = 0; index < count; index++) {
+      const mode = state % 3;
+      state = Math.floor(state / 3);
+      if (!mode) free.push(index);
+      else point[index] = ranges[index][mode - 1] / scales[index];
+    }
+    if (free.length > rows.length) continue;
+    if (free.length) {
+      const remainder = values.map((value, index) => value - dot(rows[index], point));
+      const matrix = free.map(a => free.map(b => rows.reduce((total, row) => total + row[a] * row[b], 0)));
+      const vector = free.map(a => rows.reduce((total, row, index) => total + row[a] * remainder[index], 0));
+      const solved = solveSquare(matrix, vector);
+      if (!solved) continue;
+      free.forEach((column, index) => { point[column] = solved[index]; });
+    }
+    if (point.some((value, index) => !Number.isFinite(value) || value < ranges[index][0] / scales[index] - 1e-9 || value > ranges[index][1] / scales[index] + 1e-9)) continue;
+    if (rows.some((row, index) => Math.abs(dot(row, point) - values[index]) > 1e-8)) continue;
+    output.push(point.map((value, index) => clamp(value * scales[index], ...ranges[index])));
   }
-  for (const y of range.protein) {
-    const x = (wc * c.c * (wanted.carbs - p.c * y) + wp * c.p * (wanted.protein - p.p * y)) / (wc * c.c ** 2 + wp * c.p ** 2);
-    add(x, y);
+  return output;
+}
+
+function balancedAmounts(foods, wanted, range) {
+  const coefficients = key => foods.map(food => food[key] / 100);
+  const proteinRow = coefficients('protein');
+  const carbRow = coefficients('carbs');
+  const energyRow = coefficients('kcal');
+  const fatRow = coefficients('fat');
+  if (foods[0].carbs <= 0 || foods[1].protein <= 0) throw new Error('La sostituzione richiede carboidrati nel primo alimento e proteine nel secondo. Controlla le etichette.');
+  const ranges = [range.carb, range.protein, [0, 150], [0, 30]];
+  const proteinTarget = clamp(wanted.protein, dot(proteinRow, ranges.map(item => item[0])), dot(proteinRow, ranges.map(item => item[1])));
+  const initialRanges = ranges.slice(0, 3);
+  const p3 = proteinRow.slice(0, 3);
+  const c3 = carbRow.slice(0, 3);
+  let initial = constrainedVertices([p3, c3], [proteinTarget, wanted.carbs], initialRanges);
+  if (!initial.length) {
+    initial = constrainedVertices([p3], [proteinTarget], initialRanges);
+    initial.sort((a, b) => Math.abs(dot(c3, a) - wanted.carbs) - Math.abs(dot(c3, b) - wanted.carbs) || a[2] - b[2]);
+  } else initial.sort((a, b) => a[2] - b[2]);
+  if (!initial.length) throw new Error('Non riesco a comporre il pasto con questi valori: controlla le etichette.');
+  let amounts = [...initial[0], 0];
+  if (foods[3].fat > 0) amounts[3] = clamp((wanted.fat - dot(fatRow, amounts)) / (foods[3].fat / 100), ...ranges[3]);
+  if (wanted.kcal <= 0 || Math.abs(dot(energyRow, amounts) - wanted.kcal) <= wanted.kcal * 0.04) return amounts;
+
+  // Changing oil alone preserves both the protein and carbohydrate equations.
+  if (foods[3].protein === 0 && foods[3].carbs === 0 && foods[3].kcal > 0) {
+    const requiredOil = amounts[3] + (wanted.kcal - dot(energyRow, amounts)) / (foods[3].kcal / 100);
+    if (requiredOil >= 0 && requiredOil <= 30) return [...amounts.slice(0, 3), requiredOil];
   }
-  const score = ([x, y]) => wc * (c.c * x + p.c * y - wanted.carbs) ** 2 + wp * (c.p * x + p.p * y - wanted.protein) ** 2;
-  candidates.sort((a, b) => score(a) - score(b));
-  return candidates[0];
+
+  // Bread participates in the protein equality here, before the meat is fixed.
+  const energyVertices = constrainedVertices([proteinRow, energyRow], [proteinTarget, wanted.kcal], ranges);
+  if (!energyVertices.length) {
+    const bounded = constrainedVertices([proteinRow], [proteinTarget], ranges);
+    bounded.sort((a, b) => Math.abs(dot(energyRow, a) - wanted.kcal) - Math.abs(dot(energyRow, b) - wanted.kcal));
+    return bounded[0] ?? amounts;
+  }
+  const features = point => [dot(carbRow, point) / Math.max(20, wanted.carbs), dot(fatRow, point) / Math.max(10, wanted.fat), point[2] / 150 * 0.01];
+  const target = [wanted.carbs / Math.max(20, wanted.carbs), wanted.fat / Math.max(10, wanted.fat), 0];
+  const score = point => features(point).reduce((total, value, index) => total + (value - target[index]) ** 2, 0);
+  let best = energyVertices[0];
+  for (const candidate of energyVertices) if (score(candidate) < score(best)) best = candidate;
+  for (let a = 0; a < energyVertices.length; a++) for (let b = a + 1; b < energyVertices.length; b++) {
+    const left = features(energyVertices[a]);
+    const delta = features(energyVertices[b]).map((value, index) => value - left[index]);
+    const length = dot(delta, delta);
+    if (!length) continue;
+    const mix = clamp(dot(delta, target.map((value, index) => value - left[index])) / length, 0, 1);
+    const point = energyVertices[a].map((value, index) => value + mix * (energyVertices[b][index] - value));
+    if (score(point) < score(best)) best = point;
+  }
+  const exact = constrainedVertices([proteinRow, energyRow, carbRow, fatRow], [proteinTarget, wanted.kcal, wanted.carbs, wanted.fat], ranges);
+  for (const point of exact) if (score(point) < score(best)) best = point;
+  return best;
 }
 
 function mainMeal(base, wanted, carbId, proteinId, overrides, fixed = [ingredient('vegetables', 200)]) {
@@ -137,50 +221,31 @@ function mainMeal(base, wanted, carbId, proteinId, overrides, fixed = [ingredien
   const range = bounds(carbId, adjustableProtein);
   // A companion is optional when the two eggs and the cereal already suffice.
   if (proteinId === 'eggs') range.protein = [0, 300];
-  const pair = balancedPair(getFood(carbId, overrides), getFood(adjustableProtein, overrides), {
+  const foods = [getFood(carbId, overrides), getFood(adjustableProtein, overrides), getFood('bread', overrides), getFood('olive-oil', overrides)];
+  const amounts = balancedAmounts(foods, {
+    kcal: wanted.kcal - fixedMacros.kcal,
     carbs: Math.max(0, wanted.carbs - fixedMacros.carbs),
     protein: Math.max(0, wanted.protein - fixedMacros.protein),
+    fat: wanted.fat - fixedMacros.fat,
   }, range);
-  const ingredients = [ingredient(carbId, pair[0]), ...allFixed];
-  if (pair[1] > 0.01) ingredients.splice(proteinId === 'eggs' ? ingredients.length : 1, 0, ingredient(adjustableProtein, pair[1]));
-  const beforeOil = sumMacros(ingredients.map(item => foodMacros(item.foodId, item.grams, overrides)));
-  const oil = getFood('olive-oil', overrides);
-  if (oil.fat > 0) {
-    const grams = clamp((wanted.fat - beforeOil.fat) * 100 / oil.fat, 0, 30);
-    if (grams > 0.01) ingredients.push(ingredient('olive-oil', grams));
-  }
-  // A legume pasta plus eggs can supply protein before supplying enough energy.
-  // Complete the plate with a normal bread side rather than oversized portions.
-  let extraBread = 0;
-  const afterOil = sumMacros(ingredients.map(item => foodMacros(item.foodId, item.grams, overrides)));
-  const bread = getFood('bread', overrides);
-  if (wanted.kcal > 0 && wanted.kcal - afterOil.kcal > wanted.kcal * 0.04 && bread.kcal > 0) {
-    const existingBread = ingredients.find(item => item.foodId === 'bread');
-    extraBread = clamp((wanted.kcal - afterOil.kcal) * 100 / bread.kcal, 20, Math.max(0, 150 - (existingBread?.grams ?? 0)));
-    if (extraBread > 0.01) {
-      if (existingBread) existingBread.grams += extraBread;
-      else ingredients.push(ingredient('bread', extraBread));
-    }
-  } else if (wanted.kcal > 0 && afterOil.kcal - wanted.kcal > wanted.kcal * 0.04 && oil.kcal > 0) {
-    const oilItem = ingredients.find(item => item.foodId === 'olive-oil');
-    if (oilItem) {
-      oilItem.grams = Math.max(0, oilItem.grams - (afterOil.kcal - wanted.kcal) * 100 / oil.kcal);
-      if (oilItem.grams <= 0.01) ingredients.splice(ingredients.indexOf(oilItem), 1);
-    }
-  }
-  const cookMinutes = Math.max({ pasta: 20, rice: 25, couscous: 10, potatoes: 35, 'lentil-pasta-lidl': 20 }[carbId],
+  const ingredients = [ingredient(carbId, amounts[0]), ...allFixed];
+  if (amounts[1] > 1e-7) ingredients.splice(proteinId === 'eggs' ? ingredients.length : 1, 0, ingredient(adjustableProtein, amounts[1]));
+  if (amounts[2] > 1e-7) ingredients.push(ingredient('bread', amounts[2]));
+  if (amounts[3] > 1e-7) ingredients.push(ingredient('olive-oil', amounts[3]));
+  const cookMinutes = Math.max({ pasta: 20, rice: 25, couscous: 10, potatoes: 35, 'lentil-pasta-lidl': 20, 'lentil-pasta-lidl-fresh': 15 }[carbId],
     { chicken: 20, eggs: 15, 'egg-whites': 10, salmon: 20, tuna: 5, 'pork-tenderloin': 25 }[proteinId]);
   const macros = sumMacros(ingredients.map(item => foodMacros(item.foodId, item.grams, overrides)));
   const deviations = ['protein', 'carbs', 'fat'].some(key => Math.abs(macros[key] - wanted[key]) > Math.max(4, wanted[key] * 0.12));
-  let note = `${cookMinutes}–${cookMinutes + 5} minuti indicativi, preparazioni in parallelo. Pesi a crudo/secco; tonno sgocciolato. Verdure e tutto l’olio usato sono inclusi.`;
+  let note = `${cookMinutes}–${cookMinutes + 5} minuti indicativi, preparazioni in parallelo. Pesi prima della cottura: pasta secca a secco, pasta fresca come da confezione; tonno sgocciolato. Verdure e tutto l’olio usato sono inclusi.`;
   const hasEggWhites = proteinId === 'eggs' && ingredients.some(item => item.foodId === 'egg-whites');
   if (proteinId === 'eggs') note += hasEggWhites
     ? ' 100 g di uova ≈ 2 uova medie senza guscio; completa con gli albumi indicati, ben cotti.'
     : ' 100 g di uova ≈ 2 uova medie senza guscio, ben cotte.';
-  if (carbId === 'lentil-pasta-lidl') note += ' Le proteine delle lenticchie sono già conteggiate: la porzione del secondo è adattata. Valori Lidl da verificare sulla confezione.';
-  if (extraBread > 0.01) note += ' Il pane a parte completa l’energia del pasto: i suoi carboidrati e le sue proteine sono conteggiati.';
+  if (carbId.startsWith('lentil-pasta-lidl')) note += ' Le proteine delle lenticchie sono già conteggiate: la porzione del secondo è adattata.';
+  if (amounts[2] > 1e-7) note += ' Il pane a parte completa il pasto; le sue proteine sono già sottratte alla quota del secondo.';
   if (!ingredients.some(item => item.foodId === 'olive-oil')) note += ' I grassi sono già presenti negli alimenti: non è previsto olio aggiuntivo.';
   if (deviations) note += ' Le porzioni pratiche possono discostarsi dagli obiettivi: confronta i totali effettivi.';
+  if (Math.abs(macros.protein - wanted.protein) > 0.05) note += ` Proteine: ${macros.protein.toFixed(1)} g rispetto a ${wanted.protein.toFixed(1)} g del pasto di riferimento; il vincolo delle porzioni impedisce l’equivalenza esatta.`;
   const proteinName = hasEggWhites ? 'uova e albumi' : PROTEIN_NAMES[proteinId];
   return previewMeal(base.slot, `${CARB_NAMES[carbId]} con ${proteinName} e verdure`, ingredients, note, overrides, base);
 }
@@ -202,13 +267,43 @@ export function createDayPlan(profile, targets, dateKey, overrides = {}) {
     meals.push(snack);
   }
   const breakfastBase = { ...base('breakfast'), time: training && trainingMinutes < 9 * 60 ? clockTime(trainingMinutes + 90) : '08:00' };
-  let breakfast = breakfastOptions(targets.kcal * 0.27, breakfastBase, overrides)[rotation(number, 5)];
+  const breakfasts = breakfastOptions(targets.kcal * 0.27, breakfastBase, overrides);
+  let breakfast = breakfasts[rotation(number, breakfasts.length)];
   if (training && trainingMinutes >= 9 * 60) breakfast = { ...breakfast, note: breakfast.note.replace('Colazione dopo l’allenamento nei giorni di palestra.', 'Con l’orario scelto, questa colazione precede la palestra; sposta il pasto secondo la tua routine.') };
   meals.push(breakfast);
   const consumed = sumMacros(meals.map(meal => meal.macros));
   const remaining = Object.fromEntries(['kcal', 'protein', 'carbs', 'fat'].map(key => [key, Math.max(0, targets[key] - consumed[key]) / 2]));
-  meals.push(mainMeal(base('lunch'), remaining, CARBS[rotation(number, 5)], PROTEINS[rotation(number, 6)], overrides));
-  meals.push(mainMeal(base('dinner'), remaining, CARBS[rotation(number + 2, 5)], PROTEINS[rotation(number + 3, 6)], overrides));
+  const lunchCarb = CARBS[rotation(number, CARBS.length)];
+  const lunchProtein = PROTEINS[rotation(number, PROTEINS.length)];
+  const dinnerCarb = CARBS[rotation(number + 2, CARBS.length)];
+  const dinnerProtein = PROTEINS[rotation(number + 3, PROTEINS.length)];
+  const compose = (carbAtLunch, carbAtDinner) => {
+    let lunch = mainMeal(base('lunch'), remaining, carbAtLunch, lunchProtein, overrides);
+    const dinnerTargets = Object.fromEntries(['kcal', 'protein', 'carbs', 'fat'].map(key => [key, Math.max(0, targets[key] - consumed[key] - lunch.macros[key])]));
+    const dinner = mainMeal(base('dinner'), dinnerTargets, carbAtDinner, dinnerProtein, overrides);
+    const gap = targets.kcal - consumed.kcal - lunch.macros.kcal - dinner.macros.kcal;
+    if (Math.abs(gap) > targets.kcal * 0.04) lunch = mainMeal(base('lunch'), { ...remaining, kcal: Math.max(0, lunch.macros.kcal + gap) }, carbAtLunch, lunchProtein, overrides);
+    return [lunch, dinner];
+  };
+  const energyError = pair => Math.abs(targets.kcal - consumed.kcal - pair[0].macros.kcal - pair[1].macros.kcal);
+  let pair = compose(lunchCarb, dinnerCarb);
+  // Some legume/egg combinations hit their protein and portion limits first.
+  // Prefer a feasible daily starch choice; all alternatives remain selectable.
+  if (energyError(pair) > targets.kcal * 0.05) {
+    for (let offset = 1; offset < CARBS.length; offset++) {
+      const candidate = compose(CARBS[rotation(number + offset, CARBS.length)], dinnerCarb);
+      if (energyError(candidate) < energyError(pair)) pair = candidate;
+      if (energyError(pair) <= targets.kcal * 0.03) break;
+    }
+  }
+  if (energyError(pair) > targets.kcal * 0.05) {
+    for (let offset = 1; offset < CARBS.length; offset++) {
+      const candidate = compose(lunchCarb, CARBS[rotation(number + 2 + offset, CARBS.length)]);
+      if (energyError(candidate) < energyError(pair)) pair = candidate;
+      if (energyError(pair) <= targets.kcal * 0.03) break;
+    }
+  }
+  meals.push(...pair);
   return meals;
 }
 
@@ -217,7 +312,7 @@ export function mealAlternatives(meal, targets, overrides = {}) {
   if (targets !== undefined) sumMacros([targets]);
   if (meal.slot === 'preworkout') return snackOptions(current, overrides);
   if (meal.slot === 'breakfast') return breakfastOptions(current.macros.kcal || targets?.kcal * 0.27 || 450, current, overrides);
-  const fixed = current.ingredients.filter(item => !CARBS.includes(item.foodId) && !PROTEINS.includes(item.foodId) && item.foodId !== 'olive-oil');
+  const fixed = current.ingredients.filter(item => !CARBS.includes(item.foodId) && !PROTEINS.includes(item.foodId) && !['olive-oil', 'bread'].includes(item.foodId));
   return CARBS.flatMap(carbId => PROTEINS.map(proteinId => mainMeal(current, current.macros, carbId, proteinId, overrides, fixed)));
 }
 
@@ -232,7 +327,7 @@ export function swapMealFood(meal, oldFoodId, newFoodId, overrides = {}) {
   const carbId = current.ingredients.find(item => CARBS.includes(item.foodId))?.foodId;
   const proteinId = current.ingredients.some(item => item.foodId === 'eggs') ? 'eggs' : current.ingredients.find(item => PROTEINS.includes(item.foodId))?.foodId;
   if (main && carbId && proteinId && ((CARBS.includes(oldFoodId) && CARBS.includes(newFoodId)) || (PROTEINS.includes(oldFoodId) && PROTEINS.includes(newFoodId)))) {
-    const fixed = current.ingredients.filter(item => !CARBS.includes(item.foodId) && !PROTEINS.includes(item.foodId) && item.foodId !== 'olive-oil');
+    const fixed = current.ingredients.filter(item => !CARBS.includes(item.foodId) && !PROTEINS.includes(item.foodId) && !['olive-oil', 'bread'].includes(item.foodId));
     return mainMeal(current, current.macros, CARBS.includes(oldFoodId) ? newFoodId : carbId,
       PROTEINS.includes(oldFoodId) ? newFoodId : proteinId, overrides, fixed);
   }

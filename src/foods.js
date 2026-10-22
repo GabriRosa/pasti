@@ -1,6 +1,7 @@
 const crea = code => `https://www.alimentinutrizione.it/tabelle-nutrizionali/${code}`;
-const food = (id, name, group, kcal, protein, carbs, fat, unitNote, source, estimated = false) =>
-  Object.freeze({ id, name, group, kcal, protein, carbs, fat, unitNote, source, estimated });
+const food = (id, name, group, kcal, protein, carbs, fat, unitNote, source, estimated = false, label) =>
+  Object.freeze({ id, name, group, kcal, protein, carbs, fat, unitNote, source, estimated,
+    ...(label ? { label: Object.freeze(label) } : {}) });
 
 /** Values per 100 g edible portion. Traces in CREA are represented as zero. */
 export const FOODS = Object.freeze([
@@ -8,9 +9,14 @@ export const FOODS = Object.freeze([
   food('rice', 'Riso', 'carb', 334, 6.7, 80.4, 0.4, 'Peso a crudo, riso secco.', crea('000100')),
   food('couscous', 'Couscous', 'carb', 361, 13.7, 76.5, 1.1, 'Peso a secco prima di aggiungere acqua.', crea('000045')),
   food('potatoes', 'Patate', 'carb', 72, 2, 16, 0.1, 'Peso a crudo, parte edibile senza scarti.', crea('006500')),
-  food('lentil-pasta-lidl', 'Pasta di lenticchie Lidl · stima generica', 'carb', 334, 26, 50, 1.7,
-    'Peso a secco. Stima di pasta 100% lenticchie; etichetta Lidl non verificata: inserisci i valori della confezione.',
-    'https://shop.probios.it/prodotti/piatti-pronti-prepar/pasta/pasta-di-legumi/fusilli-100-lenticchie-rosse.html', true),
+  food('lentil-pasta-lidl', 'Combino Bio High Protein · sedanini di lenticchie secchi', 'carb', 335, 26, 50, 1.7,
+    'Peso a secco prima della cottura. Confezione da 250 g; 100% farina di lenticchie rosse bio. Etichetta italiana verificata su fotografia.',
+    'https://world.openfoodfacts.org/product/4335619146440', false,
+    { verifiedOn: '2026-10-23', packGrams: 250, barcode: '4335619146440', market: 'Italia', evidenceUrl: 'https://images.openfoodfacts.org/images/products/433/561/914/6440/nutrition_it.8.full.jpg' }),
+  food('lentil-pasta-lidl-fresh', 'Nonna Mia Bio High Protein · fusilli di lenticchie freschi', 'carb', 259, 19, 39, 1,
+    'Peso fresco prima della cottura, non secco. Confezione da 200 g, da frigorifero. Etichetta italiana verificata su fotografia.',
+    'https://world.openfoodfacts.org/product/4056489631538', false,
+    { verifiedOn: '2026-10-23', packGrams: 200, barcode: '4056489631538', market: 'Italia', evidenceUrl: 'https://images.openfoodfacts.org/images/products/405/648/963/1538/nutrition_it.5.full.jpg' }),
   food('chicken', 'Petto di pollo', 'protein', 100, 23.3, 0, 0.8, 'Peso a crudo, senza pelle e ossa. Consumare cotto.', crea('106500')),
   food('eggs', 'Uova intere', 'protein', 128, 12.4, 0, 8.7, 'Peso senza guscio: circa 50 g per uovo medio. Consumare cotte.', crea('181100')),
   food('egg-whites', 'Albumi', 'protein', 43, 10.7, 0, 0, 'Peso a crudo: circa 30–35 g per albume; comodi quelli pastorizzati in brick. Consumare cotti.', crea('182010')),
@@ -30,15 +36,27 @@ export const FOODS = Object.freeze([
   food('oats', 'Fiocchi d’avena', 'breakfast', 367, 8, 66.8, 7.5, 'Peso a secco; acqua aggiunta senza calorie.', crea('003030')),
   food('greek-yogurt', 'Yogurt greco bianco 0%', 'breakfast', 51, 9, 4, 0, 'Peso del prodotto; per yogurt intero o zuccherato modifica i valori.', crea('150030')),
   food('bread', 'Pane integrale', 'carb', 224, 8.5, 44.1, 1.3, 'Peso del pane pronto da mangiare.', crea('000550')),
-  food('protein-pudding-lidl', 'Budino proteico Lidl/Milbona · stima', 'breakfast', 76, 10, 5.5, 1.5,
-    'Esempio di vasetto da 200 g, grammatura modificabile. Stima da un budino proteico analogo; etichetta Lidl non verificata.',
-    'https://shop.ehrmann.de/products/ehrmann-high-protein-pudding-chocolate', true),
-  food('protein-mousse-lidl', 'Mousse proteica Lidl/Milbona · stima', 'breakfast', 74, 10, 5, 1.6,
-    'Esempio di vasetto da 200 g, grammatura modificabile. Stima da una mousse proteica analoga; etichetta Lidl non verificata.',
-    'https://www.ehrmann.de/high-protein-duo-mousse-vanilla-chocolate-flavour/', true),
+  food('protein-pudding-lidl', 'Milbona High Protein · budino cacao, ricetta Zoma', 'breakfast', 83, 10.1, 6.5, 1.5,
+    'Vasetto da 200 g. Etichetta italiana della ricetta cacao Zoma fotografata da RetailWatch nel 2025; distinta dalle versioni cioccolato da 76 kcal/100 g.',
+    'https://www.retailwatch.it/mdd-test-budino-proteico-cacao-lidl-vs-penny/', false,
+    { verifiedOn: '2026-10-23', packGrams: 200, market: 'Italia', evidenceUrl: 'https://www.retailwatch.it/wp-content/uploads/2025/10/WhatsApp-Image-2025-10-29-at-21.57.44.jpeg' }),
+  food('protein-pudding-lidl-vanilla', 'Milbona High Protein · budino vaniglia', 'breakfast', 75, 10, 5.2, 1.5,
+    'Vasetto da 200 g. Valori per 100 g dell’etichetta italiana fotografata; usa il peso effettivo della porzione.',
+    'https://world.openfoodfacts.org/product/4056489216155', false,
+    { verifiedOn: '2026-10-23', packGrams: 200, barcode: '4056489216155', market: 'Italia', evidenceUrl: 'https://images.openfoodfacts.org/images/products/405/648/921/6155/nutrition_it.39.full.jpg' }),
+  food('protein-mousse-lidl', 'Milbona High Protein · mousse cioccolato', 'breakfast', 86, 10, 5.8, 2.2,
+    'Vasetto da 175 g. Versione da 86 kcal/100 g; etichetta fotografata concordante con la scheda italiana, distinta dalle mousse con panna.',
+    'https://www.altroconsumo.it/alimentazione/dolci-al-cucchiaio/comparatore/milbona-lidl-mousse-proteica-gusto-cioccolato/538/115186', false,
+    { verifiedOn: '2026-10-23', packGrams: 175, barcode: '4056489724070', market: 'Italia', evidenceUrl: 'https://images.openfoodfacts.org/images/products/405/648/972/4070/nutrition_en.161.full.jpg' }),
+  food('protein-mousse-lidl-vanilla', 'Milbona High Protein · mousse vaniglia', 'breakfast', 76, 10, 5.8, 1.4,
+    'Vasetto da 175 g. Valori per 100 g dell’etichetta italiana fotografata; usa il peso effettivo della porzione.',
+    'https://world.openfoodfacts.org/product/4056489759096', false,
+    { verifiedOn: '2026-10-23', packGrams: 175, barcode: '4056489759096', market: 'Italia', evidenceUrl: 'https://images.openfoodfacts.org/images/products/405/648/975/9096/nutrition_it.51.full.jpg' }),
   food('dark-chocolate', 'Cioccolato fondente', 'fat', 531, 6.6, 49.7, 33.6,
     'Peso prima di scioglierlo; il tenore di cacao e i valori cambiano tra confezioni.', crea('203020')),
 ]);
+
+export const LIDL_FOOD_IDS = Object.freeze(FOODS.filter(item => item.label).map(item => item.id));
 
 const BY_ID = new Map(FOODS.map(item => [item.id, item]));
 const MACROS = ['kcal', 'protein', 'carbs', 'fat'];
