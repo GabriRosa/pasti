@@ -1,0 +1,13 @@
+{
+  "id": "./",
+  "name": "Pasti · Diario alimentare",
+  "short_name": "Pasti",
+  "description": "Piano quotidiano, porzioni e diario personale.",
+  "lang": "it",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f6f5ee",
+  "theme_color": "#173f35",
+  "icons": [{"src": "./assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"}]
+}

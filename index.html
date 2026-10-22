@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#173f35">
+    <meta name="description" content="Pasti: il tuo piano quotidiano, le alternative in grammi e il diario alimentare. Dati salvati sul tuo dispositivo.">
+    <title>Pasti · Il tuo ritmo, ogni giorno</title>
+    <link rel="icon" href="./assets/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="./assets/icon.svg">
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="stylesheet" href="./styles.css">
+    <script type="module" src="./app.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Vai al contenuto</a>
+    <header class="app-header">
+      <a class="brand" href="#today" aria-label="Pasti, vai al diario">
+        <svg viewBox="0 0 40 40" width="39" height="39" aria-hidden="true"><rect width="40" height="40" rx="14" fill="currentColor"/><path d="M12 24c0-8 5-13 16-13 0 11-5 17-13 17" fill="#d8ed91"/><path d="m12 29 11-12" stroke="#f8f7ef" stroke-width="2.5" stroke-linecap="round"/></svg>
+        <span>Pasti<span class="brand-dot">.</span></span>
+      </a>
+      <span class="header-tagline">Il tuo ritmo, ogni giorno</span>
+      <span class="local-badge"><span aria-hidden="true">●</span> Solo sul tuo dispositivo</span>
+    </header>
+    <div class="app-shell">
+      <nav class="main-nav" aria-label="Navigazione principale">
+        <a href="#today" data-page="today"><span aria-hidden="true">◷</span><span>Oggi</span></a>
+        <a href="#profile" data-page="profile"><span aria-hidden="true">◎</span><span>Profilo</span></a>
+        <a href="#foods" data-page="foods"><span aria-hidden="true">▤</span><span>Alimenti</span></a>
+        <a href="#method" data-page="method"><span aria-hidden="true">ⓘ</span><span>Metodo</span></a>
+        <div class="nav-foot"><strong>Un pasto alla volta.</strong><p>Porzioni chiare.<br>Spazio per cambiare.</p></div>
+      </nav>
+      <main id="main" tabindex="-1"></main>
+    </div>
+    <div id="notifications" class="notifications" aria-live="polite" aria-atomic="true"></div>
+    <dialog id="app-dialog" aria-labelledby="dialog-title"></dialog>
+    <noscript><p class="noscript">Attiva JavaScript per usare Pasti. I dati sono conservati nel browser.</p></noscript>
+  </body>
+</html>
