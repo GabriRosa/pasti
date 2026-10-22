@@ -114,6 +114,66 @@ L’alternanza usa la differenza tra giorni di calendario UTC, per evitare effet
 
 Quando `trainingPlan` è presente, determina l’attività; `trainingDays` resta il campo compatibile con i vecchi profili. In assenza del piano, i giorni di `trainingDays` vengono interpretati come sala attrezzi e gli altri come riposo. L’interfaccia deriva `trainingDays` dai giorni attivi quando salva un nuovo piano. Il planner usa lo stesso helper dell’interfaccia per evitare calendari divergenti.
 
+### Attività svolta nel diario
+
+Il campo opzionale `Day.trainingLog` registra l’attività effettivamente svolta. È separato dal programma restituito da `trainingForDate`: un giorno può prevedere sala attrezzi e registrare entrambe le attività. L’assenza del campo significa “non ancora registrato”; il riposo è invece una scelta esplicita.
+
+```json
+{
+  "type": "both",
+  "source": "manual",
+  "recordedAt": "2026-10-23T10:00:00.000Z"
+}
+```
+
+`TRAINING_LOG_TYPES` espone le quattro scelte esclusive: `strength` (“Palestra”), `run` (“Corsa”), `both` (“Palestra + corsa”) e `rest` (“Riposo”). `validateTrainingLog(log)` restituisce l’oggetto invariato se valido, accetta `undefined` e rifiuta `null`, campi mancanti o aggiuntivi, tipi sconosciuti e sorgenti diverse da `manual` o `strava_csv`. Il timestamp richiede una data di calendario reale, ora completa e fuso esplicito, come `Z` o `+02:00`; la sola data e gli orari senza fuso non sono sufficienti. `trainingLogLabel(log)` valida lo stesso oggetto e restituisce l’etichetta, oppure una stringa vuota per una registrazione assente.
+
+Questi helper validano e descrivono il dato senza scriverlo. La possibilità di registrare solo oggi o nel passato dipende dalla data del diario ed è gestita da interfaccia e persistenza. Modifica e cancellazione della registrazione riguardano `trainingLog` e la data di aggiornamento; profilo, obiettivi, pasti pianificati, consumato e altri giorni restano indipendenti. Non vengono aggiunte calorie dell’allenamento al TDEE, che include già l’attività media.
+
+La sorgente `strava_csv` indica una registrazione ottenuta dal flusso locale di importazione. Non certifica chi abbia prodotto il file e non rappresenta una connessione all’account Strava. Il registro conserva soltanto tipo, sorgente e timestamp; non contiene credenziali, nomi di attività, percorsi, battiti, calorie o il CSV originale.
+
+### Importazione locale delle attività da CSV
+
+[activity-import.js](../src/activity-import.js) espone tre funzioni senza effetti sulla persistenza. `parseActivityCsv(text)` restituisce `{headers, rows}`, con intestazioni e celle come stringhe. Accetta separatori virgola o punto e virgola, BOM iniziale, righe vuote, celle tra virgolette, virgolette raddoppiate e ritorni a capo dentro una cella. Rifiuta virgolette malformate, righe di larghezza diversa dall’intestazione, delimitatori ambigui, dati binari e file oltre 5 MiB UTF-8, 25.000 righe di dati o 200 colonne.
+
+`suggestActivityColumns(headers)` propone gli indici `{dateColumn, typeColumn, idColumn}` per intestazioni note in italiano e inglese; `-1` indica una colonna non riconosciuta. Le proposte non sostituiscono la scelta delle colonne. Il nome libero dell’attività non viene usato per dedurne il tipo.
+
+`summarizeActivityCsv(parsed, options)` richiede una data e colonne distinte per data, tipo ed eventuale ID. Il riferimento orario deve essere scelto esplicitamente:
+
+```js
+const options = {
+  dateKey: '2026-10-23',
+  dateColumn: 0,
+  typeColumn: 1,
+  idColumn: 2, // -1 se il file non ha un ID da usare
+  timeBasis: 'local', // 'local' oppure 'utc'
+  timeZone: 'Europe/Rome'
+};
+```
+
+Le date ammesse sono ISO (`2026-10-23`, anche con ora, `Z` o offset), giorno/mese/anno (`23/10/2026`, anche con ora) e mese inglese abbreviato (`Oct 23, 2026, 6:00:00 AM`). Le date numeriche con barre sono sempre giorno/mese/anno: non viene tentata un’interpretazione americana. Il parser verifica i componenti del calendario senza ricorrere al riconoscimento generico delle date del browser.
+
+Con `timeBasis: 'local'`, una data senza fuso conserva il giorno scritto nel file. Con `utc`, lo stesso valore viene interpretato come UTC e convertito in `Europe/Rome`. Un `Z` o offset esplicito prevale sempre sulla scelta e viene convertito in `Europe/Rome`, anche se cambia il giorno. Un’ora locale senza fuso non permette di distinguere le due occorrenze di un’ora ripetuta al cambio dell’ora legale; per l’importazione conta il giorno locale indicato.
+
+Sono riconosciuti `Run`, `Corsa`, `TrailRun` e `VirtualRun` come corsa; `WeightTraining`, `Weight Training`, `Allenamento con i pesi`, `Pesi`, `Palestra` e `Strength training` come palestra. Maiuscole, accenti e spazi non cambiano il riconoscimento. `Workout`, `Allenamento`, campi vuoti e altri tipi restano da classificare. Più attività dello stesso tipo non si sommano: corsa e palestra nello stesso giorno producono `both`.
+
+Il risultato contiene soltanto:
+
+| Campo | Significato |
+| --- | --- |
+| `dateKey` | Data richiesta. |
+| `type` | `run`, `strength`, `both` oppure `null` se non ci sono attività riconosciute. Non restituisce mai `rest`. |
+| `matchedRows` | Righe della data richiesta dopo la rimozione dei duplicati, inclusi i tipi da classificare. |
+| `unknownTypes` | Tipi distinti da classificare nella data richiesta; un valore vuoto è indicato come `(tipo vuoto)`. |
+| `invalidRows` | Righe con data non interpretabile nell’intero file, perché non è possibile attribuirle a un giorno. |
+| `duplicateRows` | Righe duplicate nella data richiesta secondo l’ID selezionato. |
+
+La deduplicazione usa gli ID non vuoti dopo la rimozione degli spazi esterni e conserva la prima riga incontrata per quel giorno. Gli ID vuoti restano distinti; con `idColumn: -1` la deduplicazione è disattivata. Gli ID non sono inclusi nel riepilogo né nel registro salvato.
+
+Il riepilogo può contenere una classificazione parziale insieme a tipi sconosciuti o date non valide. L’interfaccia deve mostrarli e richiedere una scelta esplicita prima della registrazione. L’assenza di attività riconosciute non prova un giorno di riposo. Il file viene letto localmente: l’importazione non richiede API, credenziali o sincronizzazione e non modifica gli obiettivi nutrizionali. Formati diversi da quelli descritti richiedono una preparazione del CSV o una registrazione manuale.
+
+### Composizione del piano giornaliero
+
 `createDayPlan(profile, targets, dateKey, overrides)` interpreta la data come giorno di calendario, con domenica uguale a 0. Il parsing usa componenti UTC solo per evitare spostamenti di giorno dovuti al fuso; l’input è la data locale scelta dall’utente. Date impossibili o fuori dall’intervallo 1900–2100 vengono rifiutate.
 
 La stessa data e gli stessi input producono gli stessi piatti. Il giorno seleziona a rotazione una delle sette colazioni, uno dei tre spuntini e combinazioni diverse per pranzo e cena. Nei giorni di corsa o sala attrezzi il preworkout è previsto 15 minuti prima e può essere saltato nell’interfaccia. Per l’allenamento alle 06:00 gli orari iniziali sono 05:45 e 07:30; la colazione va spostata secondo la fine effettiva della seduta. Con un allenamento da mezzanotte alle 00:14, la nota avverte che lo spuntino cade la sera precedente.
@@ -136,10 +196,12 @@ Per esempio, un pasto con 80 g di pasta di semola, 170 g di pollo, 200 g di verd
 
 [domain.test.mjs](../tests/domain.test.mjs) controlla formula numerica, ripartizione energetica, limiti del profilo, catalogo, personalizzazione delle etichette, calendario, riposo, porzioni e ricalcolo delle sostituzioni. Le prove su pasta secca e fresca di lenticchie verificano la riduzione del pollo, le proteine del pane e cambi consecutivi; quella sul salmone verifica anche l’olio. Una matrice di profili e giorni controlla i nutrienti di ogni ingrediente e delle 36 alternative. Una seconda matrice verifica uno scostamento calorico entro il 5% in 168 scenari ordinari.
 
-I test sul deficit coprono 0, 250, 500 kcal, numeri non validi, soglia TDEE, sottopeso e retrocompatibilità. Quelli sull’allenamento coprono alternanza, giorni precedenti al riferimento, domenica/lunedì, fine mese, cambio d’anno, bisestile, ora legale e identità dei macro fra corsa e sala attrezzi. Gli import dei moduli del dominio usano la versione asset `v=20261023-deficit`.
+I test sul deficit coprono 0, 250, 500 kcal, numeri non validi, soglia TDEE, sottopeso e retrocompatibilità. Quelli sull’allenamento coprono alternanza, giorni precedenti al riferimento, domenica/lunedì, fine mese, cambio d’anno, bisestile, ora legale e identità dei macro fra corsa e sala attrezzi. I test del registro effettivo distinguono assenza e riposo, verificano le quattro etichette, date ISO reali, sorgenti manuale e CSV e indipendenza dagli snapshot nutrizionali. La nuova versione asset è `v=20261023-activity`.
+
+[activity-import.test.mjs](../tests/activity-import.test.mjs) verifica sintassi e limiti CSV, intestazioni, tipi espliciti e sconosciuti, deduplicazione, date impossibili, conversione UTC/Italia, offset, cambi d’ora e d’anno, riepiloghi parziali e assenza di dati privati estranei al risultato.
 
 ```sh
-node --test tests/domain.test.mjs
+node --test tests/domain.test.mjs tests/activity-import.test.mjs
 ```
 
 Il dominio non verifica allergie, micronutrienti o adeguatezza clinica e non misura il dispendio individuale. Tutte le quantità restano editabili nel diario.

@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ACTIVITY_LEVELS, calculateTargets, sumMacros } from '../src/nutrition.js?v=20261023-deficit';
-import { FOODS, LIDL_FOOD_IDS, getFood, foodMacros } from '../src/foods.js?v=20261023-deficit';
-import { MEAL_SLOTS, createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } from '../src/planner.js?v=20261023-deficit';
-import { trainingForDate, validateTrainingPlan } from '../src/training.js?v=20261023-deficit';
+import { ACTIVITY_LEVELS, calculateTargets, sumMacros } from '../src/nutrition.js?v=20261023-activity';
+import { FOODS, LIDL_FOOD_IDS, getFood, foodMacros } from '../src/foods.js?v=20261023-activity';
+import { MEAL_SLOTS, createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } from '../src/planner.js?v=20261023-activity';
+import { trainingForDate, validateTrainingPlan, TRAINING_LOG_TYPES, validateTrainingLog, trainingLogLabel } from '../src/training.js?v=20261023-activity';
 
 const profile = { age: 35, sex: 'male', weight: 80, height: 180, activity: 'moderate', goal: 'lose', trainingTime: '06:00', trainingDays: [1, 3, 5], specialCondition: false };
 const close = (actual, expected, tolerance = 1e-8) => assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} != ${expected}`);
@@ -472,4 +472,73 @@ test('running and strength have identical targets and meal macros with no extra 
   assert.ok(MEAL_SLOTS.every(slot => !/palestra/i.test(slot.label)));
   const weeklyRest = { ...run, trainingPlan: { mode: 'weekly', days: Array(7).fill('rest') } };
   assert.deepEqual(createDayPlan(weeklyRest, targets, '2026-10-23').map(meal => meal.slot), ['breakfast', 'lunch', 'dinner']);
+});
+
+test('activity-log choices are distinct and an absent log does not mean rest', () => {
+  assert.deepEqual(TRAINING_LOG_TYPES, [
+    { id: 'strength', label: 'Palestra' },
+    { id: 'run', label: 'Corsa' },
+    { id: 'both', label: 'Palestra + corsa' },
+    { id: 'rest', label: 'Riposo' },
+  ]);
+  assert.ok(Object.isFrozen(TRAINING_LOG_TYPES));
+  assert.ok(TRAINING_LOG_TYPES.every(Object.isFrozen));
+  assert.equal(validateTrainingLog(undefined), undefined);
+  assert.equal(trainingLogLabel(undefined), '');
+  for (const item of TRAINING_LOG_TYPES) {
+    const log = { type: item.id, source: 'manual', recordedAt: '2026-10-23T06:45:12.123Z' };
+    assert.equal(validateTrainingLog(log), log);
+    assert.equal(trainingLogLabel(log), item.label);
+  }
+});
+
+test('activity logs require the complete supported-source schema and reject unknown fields', () => {
+  const valid = { type: 'run', source: 'manual', recordedAt: '2026-10-23T06:45:12.123Z' };
+  for (const log of [null, [], 'run', false, 0, {},
+    { ...valid, type: 'walk' }, { ...valid, type: ['run', 'strength'] },
+    { ...valid, source: 'strava' }, { ...valid, source: 'garmin_api' }, { ...valid, source: null },
+    { type: 'run', source: 'manual' },
+    { ...valid, calories: 500 }, { ...valid, unexpected: true },
+    Object.create(valid),
+  ]) {
+    assert.throws(() => validateTrainingLog(log), Error);
+    assert.throws(() => trainingLogLabel(log), Error);
+  }
+  const polluted = JSON.parse('{"type":"run","source":"manual","recordedAt":"2026-10-23T06:45:12.123Z","__proto__":{"polluted":true}}');
+  assert.throws(() => validateTrainingLog(polluted));
+  assert.equal({}.polluted, undefined);
+  const imported = { ...valid, source: 'strava_csv' };
+  assert.equal(validateTrainingLog(imported), imported);
+  assert.equal(trainingLogLabel(imported), 'Corsa');
+});
+
+test('activity timestamps require real ISO instants with an explicit timezone', () => {
+  for (const recordedAt of ['2026-10-23T06:00:00Z', '2026-10-23T08:00:00+02:00',
+    '2026-10-23T01:00:00-05:00', '2028-02-29T23:59:59.123456Z']) {
+    const log = { type: 'both', source: 'manual', recordedAt };
+    assert.equal(validateTrainingLog(log).recordedAt, recordedAt);
+  }
+  for (const recordedAt of [undefined, null, NaN, Infinity, 0, new Date(), '',
+    '2026-10-23', 'October 23, 2026', '2026-10-23T06:00:00',
+    '2026-02-29T06:00:00Z', '2026-04-31T06:00:00Z', '2026-13-01T06:00:00Z',
+    '2026-10-23T24:00:00Z', '2026-10-23T06:60:00Z', '2026-10-23T06:00:60Z',
+    '2026-10-23T06:00:00+24:00']) {
+    assert.throws(() => validateTrainingLog({ type: 'rest', source: 'manual', recordedAt }), /timestamp ISO/);
+  }
+});
+
+test('validating actual activity leaves the planned session and nutrition snapshot unchanged', () => {
+  const dateKey = '2026-10-23';
+  const targets = calculateTargets(profile);
+  const day = { profileSnapshot: structuredClone(profile), targets,
+    meals: createDayPlan(profile, targets, dateKey), consumed: {}, skipped: [] };
+  const before = structuredClone(day);
+  const planned = trainingForDate(profile, dateKey);
+  const actual = Object.freeze({ type: 'both', source: 'manual', recordedAt: '2026-10-23T10:00:00Z' });
+  assert.equal(validateTrainingLog(actual), actual);
+  assert.equal(trainingLogLabel(actual), 'Palestra + corsa');
+  assert.deepEqual(day, before);
+  assert.deepEqual(trainingForDate(profile, dateKey), planned);
+  assert.equal(planned.type, 'strength');
+  assert.deepEqual(calculateTargets(day.profileSnapshot), targets);
 });

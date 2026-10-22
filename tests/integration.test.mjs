@@ -1318,3 +1318,596 @@ test('switching an existing day to rest preserves an already consumed preworkout
   assert.deepEqual(after.meals.find(item => item.id === snack.id), snack);
   assert.deepEqual(after.profileSnapshot.trainingPlan.days, Array(7).fill('rest'));
 });
+
+const recordedTraining = type => ({ type, source: 'manual', recordedAt: '2026-10-22T08:00:00.000Z' });
+
+function activityLogFixture() {
+  const key = todayKey();
+  const pastKey = dateOffset(key, -1);
+  const futureKey = dateOffset(key, 1);
+  const data = generatedDiary(key);
+  data.days[pastKey] = generatedDiary(pastKey).days[pastKey];
+  data.days[futureKey] = generatedDiary(futureKey).days[futureKey];
+  data.days[pastKey].trainingLog = recordedTraining('run');
+  const current = data.days[key];
+  const breakfast = current.meals.find(item => item.slot === 'breakfast');
+  current.consumed[breakfast.id] = { consumedAt: '2026-10-22T08:00:00.000Z', meal: clone(breakfast) };
+  current.skipped = [current.meals.find(item => item.slot === 'preworkout').id];
+  data.foodOverrides.vegetables = { kcal: 23, protein: 2, carbs: 3, fat: 0.2 };
+  return { data, key, pastKey, futureKey };
+}
+
+function chooseDiaryDate(document, key) {
+  const picker = document.querySelector('input[type="date"]');
+  picker.value = key; picker.dispatch('change');
+}
+
+function assertOnlyActivityChanged(before, after, key, type, source = 'manual') {
+  const expected = clone(before);
+  expected.days[key].updatedAt = after.days[key].updatedAt;
+  if (type === undefined) {
+    delete expected.days[key].trainingLog;
+    assert.equal(Object.hasOwn(after.days[key], 'trainingLog'), false);
+  } else {
+    assert.deepEqual(Object.keys(after.days[key].trainingLog).sort(), ['recordedAt', 'source', 'type']);
+    assert.equal(after.days[key].trainingLog.type, type);
+    assert.equal(after.days[key].trainingLog.source, source);
+    assert.ok(Number.isFinite(Date.parse(after.days[key].trainingLog.recordedAt)));
+    expected.days[key].trainingLog = after.days[key].trainingLog;
+  }
+  assert.ok(Number.isFinite(Date.parse(after.days[key].updatedAt)));
+  assert.deepEqual(after, expected, 'Only trainingLog and updatedAt on the selected date may change');
+}
+
+test('legacy diaries retain an unregistered activity instead of silently acquiring rest', async t => {
+  const data = generatedDiary(todayKey());
+  const store = new MemoryStorage(); saveData(data, store);
+  const before = store.getItem(STORAGE_KEY);
+  const { document } = await bootApp(t, store);
+  assert.equal(document.querySelector('.training-log-status').textContent, 'Non ancora registrato');
+  assert.equal(document.querySelectorAll('.training-log-choice').length, 4);
+  assert.ok(document.querySelectorAll('.training-log-choice').every(button => button.attributes['aria-pressed'] === 'false'));
+  assert.equal(document.querySelector('.training-log-footer .text-button'), null);
+  assert.equal(store.getItem(STORAGE_KEY), before);
+  assert.deepEqual(parseBackup(exportBackup(data)), data);
+});
+
+for (const [type, label] of [['strength', 'Palestra'], ['run', 'Corsa'], ['both', 'Palestra + corsa'], ['rest', 'Riposo']]) {
+  test(`recording ${type} changes only the selected day's activity and preserves nutrition and other dates`, async t => {
+    const { data, key } = activityLogFixture();
+    const store = new MemoryStorage(); saveData(data, store);
+    const { document } = await bootApp(t, store);
+    const planned = document.querySelector('.planned-training').textContent;
+    const badge = document.querySelector('.day-badge').textContent;
+    const energy = document.querySelector('[role="meter"]').attributes['aria-valuenow'];
+    document.querySelector(`[data-training-type="${type}"]`).click();
+    const after = loadData(store).data;
+    assertOnlyActivityChanged(data, after, key, type);
+    assert.notEqual(after.days[key].updatedAt, data.days[key].updatedAt);
+    assert.equal(store.writes, 2);
+    assert.equal(document.querySelector('.training-log-status').textContent, `Registrato: ${label}`);
+    for (const button of document.querySelectorAll('.training-log-choice')) {
+      assert.equal(button.attributes['aria-pressed'], String(button.attributes['data-training-type'] === type));
+    }
+    assert.equal(document.querySelector('.planned-training').textContent, planned);
+    assert.equal(document.querySelector('.day-badge').textContent, badge);
+    assert.equal(document.querySelector('[role="meter"]').attributes['aria-valuenow'], energy);
+    assert.equal(document.activeElement.id, 'training-log-title');
+    assert.deepEqual(parseBackup(exportBackup(after)), after);
+  });
+}
+
+test('changing, repeating and undoing an activity preserve the plan and never rewrite a no-op', async t => {
+  const { data, key } = activityLogFixture();
+  const store = new MemoryStorage(); saveData(data, store);
+  const { document } = await bootApp(t, store);
+  document.querySelector('[data-training-type="run"]').click();
+  const firstJSON = store.getItem(STORAGE_KEY);
+  document.querySelector('[data-training-type="run"]').click();
+  assert.equal(store.getItem(STORAGE_KEY), firstJSON);
+  assert.equal(store.writes, 2);
+  document.querySelector('[data-training-type="both"]').click();
+  assertOnlyActivityChanged(data, loadData(store).data, key, 'both');
+  assert.equal(store.writes, 3);
+  document.querySelector('.training-log-footer .text-button').click();
+  assertOnlyActivityChanged(data, loadData(store).data, key, undefined);
+  assert.equal(document.querySelector('.training-log-status').textContent, 'Non ancora registrato');
+  assert.ok(document.querySelectorAll('.training-log-choice').every(button => button.attributes['aria-pressed'] === 'false'));
+  assert.equal(document.querySelector('.training-log-footer .text-button'), null);
+  assert.equal(store.writes, 4);
+});
+
+test('saved activity reopens on its own date and changes on a past date stay isolated', async t => {
+  const { data, key, pastKey } = activityLogFixture();
+  data.days[key].trainingLog = recordedTraining('both');
+  const store = new MemoryStorage(); saveData(data, store);
+  const { document } = await bootApp(t, store);
+  assert.equal(document.querySelector('.training-log-status').textContent, 'Registrato: Palestra + corsa');
+  assert.equal(store.writes, 1);
+  chooseDiaryDate(document, pastKey);
+  assert.equal(document.querySelector('.training-log-status').textContent, 'Registrato: Corsa');
+  document.querySelector('[data-training-type="strength"]').click();
+  const changed = loadData(store).data;
+  assertOnlyActivityChanged(data, changed, pastKey, 'strength');
+  chooseDiaryDate(document, key);
+  assert.equal(document.querySelector('.training-log-status').textContent, 'Registrato: Palestra + corsa');
+  chooseDiaryDate(document, pastKey);
+  assert.equal(document.querySelector('.training-log-status').textContent, 'Registrato: Palestra');
+  assert.deepEqual(loadData(store).data, changed);
+});
+
+test('future activity controls are disabled and their event handlers reject forced clicks', async t => {
+  const { data, key, futureKey } = activityLogFixture();
+  const store = new MemoryStorage(); saveData(data, store);
+  const { document } = await bootApp(t, store);
+  chooseDiaryDate(document, futureKey);
+  const before = store.getItem(STORAGE_KEY);
+  for (const button of document.querySelectorAll('.training-log-choice')) {
+    assert.equal(button.disabled, true);
+    button.click();
+    button.dispatch('click');
+    assert.equal(store.getItem(STORAGE_KEY), before);
+  }
+  assert.equal(document.querySelector('.training-log-status').textContent, 'Non ancora registrato');
+  assert.match(document.querySelector('#notifications').textContent, /oggi.*passato/);
+  chooseDiaryDate(document, key);
+  assert.ok(document.querySelectorAll('.training-log-choice').every(button => !button.disabled));
+  assert.deepEqual(loadData(store).data, data);
+});
+
+test('opening a new future date generates a plan but never an actual activity', async t => {
+  const key = todayKey();
+  const data = generatedDiary(key);
+  data.days[key].trainingLog = recordedTraining('rest');
+  const store = new MemoryStorage(); saveData(data, store);
+  const { document } = await bootApp(t, store);
+  const futureKey = dateOffset(key, 2);
+  chooseDiaryDate(document, futureKey);
+  const after = loadData(store).data;
+  assert.deepEqual(after.days[key], data.days[key]);
+  assert.equal(Object.hasOwn(after.days[futureKey], 'trainingLog'), false);
+  assert.equal(document.querySelector('.training-log-status').textContent, 'Non ancora registrato');
+  assert.ok(document.querySelectorAll('.training-log-choice').every(button => button.disabled));
+});
+
+test('invalid activity logs fail validation and backup parsing before replacing saved data', () => {
+  const { data, key } = activityLogFixture();
+  const store = new MemoryStorage(); saveData(data, store);
+  const before = store.getItem(STORAGE_KEY);
+  const valid = recordedTraining('run');
+  const invalid = [null, [], {}, 'run',
+    { ...valid, type: 'cycling' }, { ...valid, type: 'Run' }, { ...valid, source: 'strava' },
+    { ...valid, recordedAt: '2026-02-30T08:00:00Z' }, { ...valid, recordedAt: '2026-10-22T08:00:00' },
+    { ...valid, recordedAt: '2026-10-22T25:00:00Z' }, { ...valid, recordedAt: 1792656000000 },
+    { ...valid, extra: true }, { type: 'run', source: 'manual' },
+    { type: 'run', recordedAt: valid.recordedAt }, { source: 'manual', recordedAt: valid.recordedAt },
+  ];
+  for (const log of invalid) {
+    const replacement = clone(data); replacement.days[key].trainingLog = log;
+    assert.throws(() => validateData(replacement), JSON.stringify(log));
+    assert.throws(() => saveData(replacement, store), JSON.stringify(log));
+    assert.throws(() => parseBackup(JSON.stringify(replacement)), JSON.stringify(log));
+    assert.equal(store.getItem(STORAGE_KEY), before);
+  }
+  assert.equal(store.writes, 1);
+});
+
+test('invalid activity backup imports show an error without opening confirmation or replacing the diary', async t => {
+  const { data, key } = activityLogFixture();
+  const store = new MemoryStorage(); saveData(data, store);
+  const before = store.getItem(STORAGE_KEY);
+  const { document } = await bootApp(t, store, 'profile');
+  for (const log of [null, { ...recordedTraining('both'), source: 'hevy' }, { ...recordedTraining('run'), recordedAt: '2026-02-30T00:00:00Z' }]) {
+    const invalid = clone(data); invalid.days[key].trainingLog = log;
+    const json = JSON.stringify(invalid);
+    const input = document.querySelector('#backup-file');
+    input.files = [{ size: Buffer.byteLength(json), text: async () => json }]; input.dispatch('change');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(document.querySelector('#app-dialog').open, false);
+    assert.equal(document.querySelector('#notifications').children[0].attributes.role, 'alert');
+    assert.equal(store.getItem(STORAGE_KEY), before);
+  }
+  assert.equal(store.writes, 1);
+});
+
+test('activity backup import remains cancellable and restores all recorded dates only after confirmation', async t => {
+  const { data, key, pastKey } = activityLogFixture();
+  const replacement = clone(data);
+  replacement.days[key].trainingLog = recordedTraining('strength');
+  replacement.days[pastKey].trainingLog = recordedTraining('rest');
+  const store = new MemoryStorage(); saveData(data, store);
+  const { document, navigate } = await bootApp(t, store, 'profile');
+  const json = exportBackup(replacement);
+  const openImport = async () => {
+    const input = document.querySelector('#backup-file');
+    input.files = [{ size: Buffer.byteLength(json), text: async () => json }]; input.dispatch('change');
+    await new Promise(resolve => setImmediate(resolve));
+  };
+  await openImport();
+  assert.equal(document.querySelector('#app-dialog').open, true);
+  assert.deepEqual(loadData(store).data, data);
+  document.querySelector('.dialog-actions button.secondary').click();
+  assert.deepEqual(loadData(store).data, data);
+  await openImport();
+  document.querySelector('.dialog-actions button.primary').click();
+  assert.deepEqual(loadData(store).data, replacement);
+  navigate('today');
+  assert.equal(document.querySelector('.training-log-status').textContent, 'Registrato: Palestra');
+  chooseDiaryDate(document, pastKey);
+  assert.equal(document.querySelector('.training-log-status').textContent, 'Registrato: Riposo');
+  assert.equal(store.writes, 2);
+});
+
+test('a failed activity save is visibly unsaved and can be retried without changing nutrition', async t => {
+  const { data, key } = activityLogFixture();
+  const store = new MemoryStorage(); saveData(data, store);
+  const before = store.getItem(STORAGE_KEY);
+  const { document } = await bootApp(t, store);
+  const setItem = store.setItem.bind(store);
+  store.setItem = () => { throw new Error('QuotaExceededError'); };
+  document.querySelector('[data-training-type="run"]').click();
+  assert.equal(store.getItem(STORAGE_KEY), before);
+  assert.equal(document.querySelector('.training-log-status').textContent, 'Registrato: Corsa');
+  assert.match(document.querySelector('.notice.danger').textContent, /non salvate/);
+  assert.equal(document.querySelector('#notifications').children[0].attributes.role, 'alert');
+  assert.doesNotMatch(document.querySelector('#notifications').textContent, /Attività registrata/);
+  store.setItem = setItem;
+  const retry = document.querySelectorAll('.notice.danger button').find(button => button.textContent === 'Riprova salvataggio');
+  retry.click();
+  assertOnlyActivityChanged(data, loadData(store).data, key, 'run');
+  assert.equal(document.querySelector('.notice.danger'), null);
+  assert.equal(store.writes, 2);
+});
+
+test('a clean cross-tab update refreshes the activity and a later change preserves external consumption', async t => {
+  const { data, key } = activityLogFixture();
+  const store = new MemoryStorage(); saveData(data, store);
+  const { document, window } = await bootApp(t, store);
+  const external = clone(data);
+  external.days[key].trainingLog = recordedTraining('run');
+  const dinner = external.days[key].meals.find(item => item.slot === 'dinner');
+  external.days[key].consumed[dinner.id] = { consumedAt: '2026-10-22T20:00:00Z', meal: clone(dinner) };
+  saveData(external, store);
+  window.dispatch('storage', { key: STORAGE_KEY });
+  assert.equal(document.querySelector('.training-log-status').textContent, 'Registrato: Corsa');
+  assert.deepEqual(loadData(store).data, external);
+  document.querySelector('[data-training-type="both"]').click();
+  assertOnlyActivityChanged(external, loadData(store).data, key, 'both');
+  assert.equal(store.writes, 3);
+});
+
+test('an activity change during a cross-tab conflict cannot overwrite newer training or meal data', async t => {
+  const { data, key } = activityLogFixture();
+  const store = new MemoryStorage(); saveData(data, store);
+  const { document, window } = await bootApp(t, store);
+  const lunchIndex = data.days[key].meals.findIndex(item => item.slot === 'lunch');
+  document.querySelectorAll('.meal-card')[lunchIndex].querySelector('.meal-actions button').click();
+  assert.equal(document.querySelector('#app-dialog').open, true);
+  const external = clone(data);
+  external.days[key].trainingLog = recordedTraining('strength');
+  const dinner = external.days[key].meals.find(item => item.slot === 'dinner');
+  external.days[key].consumed[dinner.id] = { consumedAt: '2026-10-22T20:00:00Z', meal: clone(dinner) };
+  saveData(external, store);
+  const externalJSON = store.getItem(STORAGE_KEY);
+  window.dispatch('storage', { key: STORAGE_KEY });
+  document.querySelector('[data-training-type="run"]').click();
+  assert.equal(store.getItem(STORAGE_KEY), externalJSON);
+  assert.equal(store.writes, 2);
+  assert.match(document.querySelector('#notifications').textContent, /altra scheda/);
+});
+
+test('applying a new planned profile retains today and historical actual activity', async t => {
+  const { data, key, pastKey } = activityLogFixture();
+  data.days[key].trainingLog = recordedTraining('both');
+  data.profile = alternatingProfile({ trainingPlan: { mode: 'alternating', startDate: key, firstType: 'run' } });
+  const store = new MemoryStorage(); saveData(data, store);
+  const { document, navigate } = await bootApp(t, store, 'profile');
+  document.querySelector('.target-preview button').click();
+  document.querySelector('.dialog-actions button.primary').click();
+  const after = loadData(store).data;
+  assert.deepEqual(after.days[key].trainingLog, data.days[key].trainingLog);
+  assert.deepEqual(after.days[pastKey], data.days[pastKey]);
+  assert.notDeepEqual(after.days[key].profileSnapshot, data.days[key].profileSnapshot);
+  navigate('today');
+  assert.equal(document.querySelector('.training-log-status').textContent, 'Registrato: Palestra + corsa');
+  assert.equal(document.querySelector('.planned-training').textContent, 'Previsto: Corsa alle 06:00');
+  assert.equal(document.querySelector('.day-badge').textContent, 'Corsa · 06:00');
+});
+
+const csvRows = rows => rows.map(row => row.map(value => `"${String(value).replaceAll('"', '""')}"`).join(',')).join('\r\n');
+const csvSubmit = document => document.querySelector('.csv-import-panel .dialog-actions button.primary');
+
+async function loadActivityFile(document, text, properties = {}) {
+  const input = document.querySelector('[name="activityCsv"]');
+  input.files = [{ name: 'activities.csv', size: Buffer.byteLength(text), text: async () => text, ...properties }];
+  input.dispatch('change');
+  await new Promise(resolve => setImmediate(resolve));
+}
+
+function selectCsvValue(document, name, value) {
+  const select = document.querySelector(`[name="${name}"]`);
+  assert.ok(select, name);
+  select.value = value; select.dispatch('change');
+}
+
+test('CSV import requires a time basis and confirmation, deduplicates IDs and persists only the selected date summary', async t => {
+  const { data, key, pastKey } = activityLogFixture();
+  const absentKey = dateOffset(key, -3);
+  const text = csvRows([
+    ['Activity ID', 'Activity Date', 'Activity Type', 'Activity Name'],
+    ['9007199254740993', `${key}T06:00:00`, 'Run', 'PRIVATE RUN NAME'],
+    ['9007199254740993', `${key}T06:00:00`, 'Run', 'PRIVATE RUN NAME'],
+    ['9007199254740994', `${key}T18:00:00`, 'WeightTraining', 'PRIVATE HEVY NAME'],
+    ['3', `${pastKey}T06:00:00`, 'Run', 'old session'],
+    ['4', `${absentKey}T06:00:00`, 'Run', 'unvisited session'],
+  ]);
+  const store = new MemoryStorage(); saveData(data, store);
+  const { document } = await bootApp(t, store);
+  document.querySelector('.training-log-import button').click();
+  assert.match(document.querySelector('.csv-sync-info').textContent, /Sincronizzazione automatica non attiva/);
+  await loadActivityFile(document, text);
+  assert.equal(document.querySelector('[name="csvTimeBasis"]').value, '');
+  assert.equal(csvSubmit(document).disabled, true);
+  assert.deepEqual(loadData(store).data, data);
+  selectCsvValue(document, 'csvTimeBasis', 'local');
+  assert.equal(csvSubmit(document).disabled, false);
+  assert.match(csvSubmit(document).textContent, /Registra Palestra \+ corsa/);
+  assert.deepEqual(document.querySelectorAll('.csv-counts dd').map(node => node.textContent), ['2', '1', '0', '0']);
+  assert.deepEqual(loadData(store).data, data);
+  csvSubmit(document).click();
+  const after = loadData(store).data;
+  assertOnlyActivityChanged(data, after, key, 'both', 'strava_csv');
+  assert.equal(Object.hasOwn(after.days, absentKey), false);
+  assert.equal(document.querySelector('#app-dialog').open, false);
+  assert.equal(document.querySelector('.training-log-status').textContent, 'Registrato: Palestra + corsa · CSV Strava');
+  const backup = exportBackup(after);
+  assert.doesNotMatch(backup, /PRIVATE|900719925474099|Activity Name/);
+  assert.deepEqual(parseBackup(backup), after);
+  assert.equal(store.writes, 2);
+});
+
+test('CSV summaries replace an existing manual log only through the explicitly labelled confirmation', async t => {
+  const { data, key } = activityLogFixture();
+  data.days[key].trainingLog = recordedTraining('rest');
+  const store = new MemoryStorage(); saveData(data, store);
+  const { document } = await bootApp(t, store);
+  document.querySelector('.training-log-import button').click();
+  await loadActivityFile(document, csvRows([['Activity Date', 'Activity Type'], [key, 'TrailRun']]));
+  selectCsvValue(document, 'csvTimeBasis', 'local');
+  assert.match(csvSubmit(document).textContent, /Sostituisci Riposo con Corsa/);
+  assert.match(document.querySelector('.csv-preview').textContent, /sostituirà la registrazione esistente: Riposo/);
+  assert.deepEqual(loadData(store).data, data);
+  csvSubmit(document).click();
+  assertOnlyActivityChanged(data, loadData(store).data, key, 'run', 'strava_csv');
+});
+
+test('unknown activity types and invalid dates block a partial CSV proposal until a human chooses the day result', async t => {
+  const { data, key } = activityLogFixture();
+  const store = new MemoryStorage(); saveData(data, store);
+  const { document } = await bootApp(t, store);
+  document.querySelector('.training-log-import button').click();
+  await loadActivityFile(document, csvRows([
+    ['Activity Date', 'Activity Type'], [key, 'Run'], [key, 'Workout'], ['2026-02-30', 'WeightTraining'],
+  ]));
+  selectCsvValue(document, 'csvTimeBasis', 'local');
+  assert.deepEqual(document.querySelectorAll('.csv-counts dd').map(node => node.textContent), ['2', '0', '1', '1']);
+  assert.equal(document.querySelector('[name="csvExplicitType"]').value, '');
+  assert.equal(csvSubmit(document).disabled, true);
+  csvSubmit(document).dispatch('click');
+  assert.deepEqual(loadData(store).data, data);
+  selectCsvValue(document, 'csvExplicitType', 'both');
+  assert.equal(csvSubmit(document).disabled, false);
+  csvSubmit(document).click();
+  assertOnlyActivityChanged(data, loadData(store).data, key, 'both', 'strava_csv');
+});
+
+test('a CSV without activities on the chosen day never assumes rest', async t => {
+  const { data, key, pastKey } = activityLogFixture();
+  const store = new MemoryStorage(); saveData(data, store);
+  const { document } = await bootApp(t, store);
+  document.querySelector('.training-log-import button').click();
+  await loadActivityFile(document, csvRows([['Activity Date', 'Activity Type'], [pastKey, 'Run']]));
+  selectCsvValue(document, 'csvTimeBasis', 'local');
+  assert.equal(csvSubmit(document).disabled, true);
+  assert.match(document.querySelector('.csv-preview').textContent, /non dimostra un giorno di riposo/);
+  assert.equal(document.querySelector('[name="csvExplicitType"]').value, '');
+  assert.deepEqual(loadData(store).data, data);
+  selectCsvValue(document, 'csvExplicitType', 'rest');
+  csvSubmit(document).click();
+  assertOnlyActivityChanged(data, loadData(store).data, key, 'rest', 'strava_csv');
+});
+
+test('unrecognized CSV headers require explicit mapping and reject overlapping date, type and ID columns', async t => {
+  const { data, key } = activityLogFixture();
+  const store = new MemoryStorage(); saveData(data, store);
+  const { document } = await bootApp(t, store);
+  document.querySelector('.training-log-import button').click();
+  await loadActivityFile(document, csvRows([['When?', 'What?', 'Reference'], [key, 'Corsa', 'same'], [key, 'Corsa', 'same']]));
+  selectCsvValue(document, 'csvTimeBasis', 'local');
+  assert.equal(document.querySelector('[name="csvDateColumn"]').value, '-1');
+  assert.equal(csvSubmit(document).disabled, true);
+  selectCsvValue(document, 'csvDateColumn', '0');
+  selectCsvValue(document, 'csvTypeColumn', '0');
+  assert.equal(csvSubmit(document).disabled, true);
+  assert.match(document.querySelector('.csv-import-panel .form-error').textContent, /distinte/);
+  selectCsvValue(document, 'csvTypeColumn', '1');
+  selectCsvValue(document, 'csvIdColumn', '0');
+  assert.equal(csvSubmit(document).disabled, true);
+  selectCsvValue(document, 'csvIdColumn', '2');
+  assert.equal(csvSubmit(document).disabled, false);
+  assert.deepEqual(document.querySelectorAll('.csv-counts dd').map(node => node.textContent), ['1', '1', '0', '0']);
+  selectCsvValue(document, 'csvIdColumn', '-1');
+  assert.deepEqual(document.querySelectorAll('.csv-counts dd').map(node => node.textContent), ['2', '0', '0', '0']);
+  csvSubmit(document).click();
+  assertOnlyActivityChanged(data, loadData(store).data, key, 'run', 'strava_csv');
+});
+
+test('the CSV time-basis selector changes the matched day at the UTC-to-Italy midnight boundary', async t => {
+  const { data, key, pastKey } = activityLogFixture();
+  const store = new MemoryStorage(); saveData(data, store);
+  const { document } = await bootApp(t, store);
+  document.querySelector('.training-log-import button').click();
+  await loadActivityFile(document, csvRows([['Activity Date', 'Activity Type'], [`${pastKey}T23:30:00`, 'Run']]));
+  selectCsvValue(document, 'csvTimeBasis', 'local');
+  assert.equal(csvSubmit(document).disabled, true);
+  assert.equal(document.querySelectorAll('.csv-counts dd')[0].textContent, '0');
+  selectCsvValue(document, 'csvTimeBasis', 'utc');
+  assert.equal(csvSubmit(document).disabled, false);
+  assert.equal(document.querySelectorAll('.csv-counts dd')[0].textContent, '1');
+  csvSubmit(document).click();
+  assertOnlyActivityChanged(data, loadData(store).data, key, 'run', 'strava_csv');
+});
+
+test('changing CSV mapping or time basis clears a previous manual answer to an ambiguous preview', async t => {
+  const { data, key } = activityLogFixture();
+  const store = new MemoryStorage(); saveData(data, store);
+  const { document } = await bootApp(t, store);
+  document.querySelector('.training-log-import button').click();
+  await loadActivityFile(document, csvRows([['Activity Date', 'Activity Type', 'ID'], [key, 'Workout', '1']]));
+  selectCsvValue(document, 'csvTimeBasis', 'local');
+  selectCsvValue(document, 'csvExplicitType', 'strength');
+  assert.equal(csvSubmit(document).disabled, false);
+  selectCsvValue(document, 'csvTimeBasis', 'utc');
+  assert.equal(document.querySelector('[name="csvExplicitType"]').value, '');
+  assert.equal(csvSubmit(document).disabled, true);
+  selectCsvValue(document, 'csvExplicitType', 'strength');
+  selectCsvValue(document, 'csvIdColumn', '-1');
+  assert.equal(document.querySelector('[name="csvExplicitType"]').value, '');
+  assert.equal(csvSubmit(document).disabled, true);
+  assert.deepEqual(loadData(store).data, data);
+});
+
+test('replacing a valid CSV with malformed, oversized or non-CSV files cannot submit the old preview', async t => {
+  const { data, key } = activityLogFixture();
+  const store = new MemoryStorage(); saveData(data, store);
+  const { document } = await bootApp(t, store);
+  document.querySelector('.training-log-import button').click();
+  const valid = csvRows([['Activity Date', 'Activity Type'], [key, 'Run']]);
+  let blockedReads = 0;
+  for (const [text, properties] of [
+    ['Activity Date,Activity Type\n"unterminated,Run', {}],
+    [valid, { name: 'archive.zip', text: async () => { blockedReads++; return valid; } }],
+    [valid, { size: 5 * 1024 * 1024 + 1, text: async () => { blockedReads++; return valid; } }],
+  ]) {
+    await loadActivityFile(document, valid);
+    selectCsvValue(document, 'csvTimeBasis', 'local');
+    assert.equal(csvSubmit(document).disabled, false);
+    await loadActivityFile(document, text, properties);
+    assert.equal(csvSubmit(document).disabled, true);
+    assert.notEqual(document.querySelector('.csv-import-panel .form-error').textContent, '');
+    csvSubmit(document).dispatch('click');
+    assert.deepEqual(loadData(store).data, data);
+  }
+  assert.equal(blockedReads, 0);
+  assert.equal(store.writes, 1);
+});
+
+test('cancelling a CSV replacement preserves the existing manual activity and discards the preview', async t => {
+  const { data, key } = activityLogFixture();
+  data.days[key].trainingLog = recordedTraining('both');
+  const store = new MemoryStorage(); saveData(data, store);
+  const { document } = await bootApp(t, store);
+  document.querySelector('.training-log-import button').click();
+  await loadActivityFile(document, csvRows([['Activity Date', 'Activity Type'], [key, 'Run']]));
+  selectCsvValue(document, 'csvTimeBasis', 'local');
+  assert.match(csvSubmit(document).textContent, /Sostituisci Palestra \+ corsa con Corsa/);
+  document.querySelector('.csv-import-panel .dialog-actions button').click();
+  assert.equal(document.querySelector('#app-dialog').open, false);
+  assert.deepEqual(loadData(store).data, data);
+  document.querySelector('.training-log-import button').click();
+  assert.equal(csvSubmit(document).disabled, true);
+  assert.equal(document.querySelector('.csv-preview').textContent, '');
+  assert.equal(store.writes, 1);
+});
+
+test('a selected-date change after a CSV preview cannot apply it to either day', async t => {
+  const { data, key, pastKey } = activityLogFixture();
+  const store = new MemoryStorage(); saveData(data, store);
+  const { document } = await bootApp(t, store);
+  document.querySelector('.training-log-import button').click();
+  await loadActivityFile(document, csvRows([['Activity Date', 'Activity Type'], [key, 'Run']]));
+  selectCsvValue(document, 'csvTimeBasis', 'local');
+  chooseDiaryDate(document, pastKey);
+  csvSubmit(document).click();
+  assert.match(document.querySelector('.csv-import-panel .form-error').textContent, /data selezionata è cambiata/);
+  assert.deepEqual(loadData(store).data, data);
+  assert.equal(store.writes, 1);
+});
+
+test('a cross-tab write after a CSV preview preserves the external activity and meal consumption', async t => {
+  const { data, key } = activityLogFixture();
+  const store = new MemoryStorage(); saveData(data, store);
+  const { document, window } = await bootApp(t, store);
+  document.querySelector('.training-log-import button').click();
+  await loadActivityFile(document, csvRows([['Activity Date', 'Activity Type'], [key, 'Run']]));
+  selectCsvValue(document, 'csvTimeBasis', 'local');
+  const external = clone(data);
+  external.days[key].trainingLog = recordedTraining('strength');
+  const dinner = external.days[key].meals.find(item => item.slot === 'dinner');
+  external.days[key].consumed[dinner.id] = { consumedAt: '2026-10-23T20:00:00Z', meal: clone(dinner) };
+  saveData(external, store);
+  const before = store.getItem(STORAGE_KEY);
+  window.dispatch('storage', { key: STORAGE_KEY });
+  csvSubmit(document).click();
+  assert.match(document.querySelector('.csv-import-panel .form-error').textContent, /dati locali sono cambiati/);
+  assert.equal(store.getItem(STORAGE_KEY), before);
+  assert.equal(store.writes, 2);
+});
+
+test('a slower previous CSV read cannot replace a newer selection or revive a cancelled import', async t => {
+  const { data, key } = activityLogFixture();
+  const store = new MemoryStorage(); saveData(data, store);
+  const { document } = await bootApp(t, store);
+  document.querySelector('.training-log-import button').click();
+  let resolveSlow;
+  const input = document.querySelector('[name="activityCsv"]');
+  input.files = [{ name: 'slow.csv', size: 100, text: () => new Promise(resolve => { resolveSlow = resolve; }) }];
+  input.dispatch('change');
+  await loadActivityFile(document, csvRows([['Activity Date', 'Activity Type'], [key, 'WeightTraining']]));
+  selectCsvValue(document, 'csvTimeBasis', 'local');
+  assert.match(csvSubmit(document).textContent, /Registra Palestra/);
+  resolveSlow(csvRows([['Activity Date', 'Activity Type'], [key, 'Run']]));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.match(csvSubmit(document).textContent, /Registra Palestra/);
+  document.querySelector('.csv-import-panel .dialog-actions button').click();
+  assert.deepEqual(loadData(store).data, data);
+  document.querySelector('.training-log-import button').click();
+  const pending = document.querySelector('[name="activityCsv"]');
+  pending.files = [{ name: 'cancelled.csv', size: 100, text: () => new Promise(resolve => { resolveSlow = resolve; }) }];
+  pending.dispatch('change');
+  document.querySelector('.csv-import-panel .dialog-actions button').click();
+  resolveSlow(csvRows([['Activity Date', 'Activity Type'], [key, 'Run']]));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(document.querySelector('#app-dialog').open, false);
+  assert.deepEqual(loadData(store).data, data);
+  assert.equal(store.writes, 1);
+});
+
+test('CSV import is disabled on future dates and forced events cannot open its dialog', async t => {
+  const { data, futureKey } = activityLogFixture();
+  const store = new MemoryStorage(); saveData(data, store);
+  const { document } = await bootApp(t, store);
+  chooseDiaryDate(document, futureKey);
+  const button = document.querySelector('.training-log-import button');
+  assert.equal(button.disabled, true);
+  button.click(); button.dispatch('click');
+  assert.equal(document.querySelector('#app-dialog').open, false);
+  assert.deepEqual(loadData(store).data, data);
+});
+
+test('a CSV save failure keeps the previous persisted diary and exposes an unsaved recoverable result', async t => {
+  const { data, key } = activityLogFixture();
+  const store = new MemoryStorage(); saveData(data, store);
+  const before = store.getItem(STORAGE_KEY);
+  const { document } = await bootApp(t, store);
+  document.querySelector('.training-log-import button').click();
+  await loadActivityFile(document, csvRows([['Activity Date', 'Activity Type'], [key, 'Run']]));
+  selectCsvValue(document, 'csvTimeBasis', 'local');
+  store.setItem = () => { throw new Error('QuotaExceededError'); };
+  csvSubmit(document).click();
+  assert.equal(store.getItem(STORAGE_KEY), before);
+  assert.match(document.querySelector('.notice.danger').textContent, /non salvate/);
+  assert.equal(document.querySelector('#notifications').children[0].attributes.role, 'alert');
+  assert.doesNotMatch(document.querySelector('#notifications').textContent, /Registrato da CSV/);
+  assert.equal(store.writes, 1);
+});

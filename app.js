@@ -1,8 +1,9 @@
-import { ACTIVITY_LEVELS, calculateTargets, sumMacros } from './src/nutrition.js?v=20261023-deficit';
-import { FOODS, LIDL_FOOD_IDS, getFood } from './src/foods.js?v=20261023-deficit';
-import { createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } from './src/planner.js?v=20261023-deficit';
-import { trainingForDate, validateTrainingPlan } from './src/training.js?v=20261023-deficit';
-import { STORAGE_KEY, MAX_BACKUP_BYTES, createEmptyData, validateData, parseBackup, loadData, saveData, exportBackup, clearData } from './src/storage.js?v=20261023-deficit';
+import { ACTIVITY_LEVELS, calculateTargets, sumMacros } from './src/nutrition.js?v=20261023-activity';
+import { FOODS, LIDL_FOOD_IDS, getFood } from './src/foods.js?v=20261023-activity';
+import { createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } from './src/planner.js?v=20261023-activity';
+import { trainingForDate, validateTrainingPlan, TRAINING_LOG_TYPES, validateTrainingLog, trainingLogLabel } from './src/training.js?v=20261023-activity';
+import { parseActivityCsv, suggestActivityColumns, summarizeActivityCsv } from './src/activity-import.js?v=20261023-activity';
+import { STORAGE_KEY, MAX_BACKUP_BYTES, createEmptyData, validateData, parseBackup, loadData, saveData, exportBackup, clearData } from './src/storage.js?v=20261023-activity';
 
 const $ = selector => document.querySelector(selector);
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -144,6 +145,159 @@ function goToMeals() {
   heading.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
 }
 
+function recordTraining(type) {
+  if (selectedDate > localDate()) { notify('Puoi registrare un’attività solo per oggi o per un giorno passato.', true); return; }
+  const previous = data.days[selectedDate]?.trainingLog;
+  if (previous?.type === type || (type === undefined && previous === undefined)) return;
+  const log = type === undefined ? undefined : { type, source: 'manual', recordedAt: new Date().toISOString() };
+  try { validateTrainingLog(log); } catch (error) { notify(error.message, true); return; }
+  const updated = updateDay(day => {
+    if (log === undefined) delete day.trainingLog;
+    else day.trainingLog = log;
+  });
+  if (updated) {
+    $('#training-log-title')?.focus({ preventScroll: true });
+    if (!unsaved) notify(log ? `Attività registrata: ${trainingLogLabel(log)}.` : 'Registrazione dell’attività annullata.');
+  }
+}
+
+function renderTrainingLog(day, planned) {
+  const future = day.dateKey > localDate();
+  const label = trainingLogLabel(day.trainingLog);
+  return h('section', { class: 'panel training-log-card', 'aria-labelledby': 'training-log-title' },
+    h('div', { class: 'training-log-heading' }, h('div', {}, h('h2', { id: 'training-log-title', tabindex: '-1' }, 'Attività svolta'),
+      h('p', { class: 'planned-training' }, `Previsto: ${planned.label}${planned.time ? ` alle ${planned.time}` : ''}`)),
+      h('p', { class: `training-log-status${label ? ' recorded' : ''}`, role: 'status' }, label ? `Registrato: ${label}${day.trainingLog.source === 'strava_csv' ? ' · CSV Strava' : ''}` : 'Non ancora registrato')),
+    h('div', { class: 'training-log-choices', role: 'group', 'aria-label': 'Scegli l’attività effettivamente svolta' },
+      ...TRAINING_LOG_TYPES.map(type => button(type.label, () => recordTraining(type.id), 'training-log-choice', {
+        'aria-pressed': day.trainingLog?.type === type.id, 'data-training-type': type.id, disabled: future,
+      }))),
+    h('div', { class: 'training-log-footer' }, h('p', { class: 'helper' }, future
+      ? 'Potrai registrare l’attività da questa data. Il programma è soltanto una previsione.'
+      : 'Il consumo totale medio comprende già gli allenamenti. Questa registrazione non aggiunge altre calorie.'),
+      day.trainingLog && button('Annulla registrazione attività', () => recordTraining(undefined), 'text-button', { disabled: future })),
+    h('div', { class: 'training-log-import' }, button('Importa attività da CSV', openActivityCsvImport, 'button secondary small', { disabled: future }), h('span', {}, 'File locale, senza sincronizzazione automatica.')));
+}
+
+function openActivityCsvImport() {
+  const dateKey = selectedDate;
+  if (dateKey > localDate() || !data.days[dateKey]) { notify('Apri un giorno passato o quello di oggi prima di importare.', true); return; }
+  const originalLog = JSON.stringify(data.days[dateKey].trainingLog ?? null);
+  let parsed = null;
+  let summary = null;
+  let readVersion = 0;
+  let dateColumn;
+  let typeColumn;
+  let idColumn;
+  const container = h('div', { class: 'dialog-content csv-import-panel', id: 'csv-import-panel' });
+  const error = h('p', { class: 'form-error', role: 'alert' });
+  const fileStatus = h('p', { class: 'helper' });
+  const mapping = h('div', { class: 'csv-mapping', hidden: true });
+  const preview = h('div', { class: 'csv-preview', 'aria-live': 'polite' });
+  const explicitType = h('select', { name: 'csvExplicitType', onchange: () => renderPreview() },
+    h('option', { value: '' }, 'Scegli dopo aver controllato il giorno…'),
+    ...TRAINING_LOG_TYPES.map(type => h('option', { value: type.id }, type.label)));
+  const explicitField = field('Attività effettivamente svolta in questa data', explicitType);
+  explicitField.hidden = true;
+  const timeBasis = h('select', { name: 'csvTimeBasis', required: true, onchange: () => updateSummary() },
+    h('option', { value: '' }, 'Scegli come interpretare le date…'),
+    h('option', { value: 'local' }, 'Ora locale italiana (Europe/Rome)'),
+    h('option', { value: 'utc' }, 'UTC, da convertire in ora italiana'));
+  const typeLabel = type => TRAINING_LOG_TYPES.find(item => item.id === type)?.label;
+  const needsChoice = () => !summary || summary.invalidRows > 0 || summary.unknownTypes.length > 0 || summary.type === null;
+  const selectedType = () => needsChoice() ? explicitType.value : summary.type;
+  const submit = button('Controlla prima l’anteprima', () => {
+    try {
+      if (!summary || !typeLabel(selectedType())) throw new Error('Controlla l’anteprima e scegli un’attività quando richiesta.');
+      if (selectedDate !== dateKey) throw new Error('La data selezionata è cambiata. Chiudi e riapri l’importazione per il giorno corretto.');
+      if (dateKey > localDate()) throw new Error('Le attività future non possono essere registrate.');
+      if (storageConflict || storageReadError) throw new Error('I dati locali sono cambiati o non sono disponibili. Ricarica prima di importare.');
+      if (!data.days[dateKey] || JSON.stringify(data.days[dateKey].trainingLog ?? null) !== originalLog) throw new Error('La registrazione del giorno è cambiata. Chiudi e riapri l’anteprima.');
+      const log = { type: selectedType(), source: 'strava_csv', recordedAt: new Date().toISOString() };
+      validateTrainingLog(log);
+      const next = clone(data);
+      next.days[dateKey].trainingLog = log;
+      next.days[dateKey].updatedAt = log.recordedAt;
+      persist(next);
+      closeDialog(); render();
+      if (!unsaved) notify(`Registrato da CSV Strava: ${typeLabel(log.type)} per ${dateKey}.`);
+    } catch (failure) { error.textContent = failure.message; }
+  }, 'button primary', { disabled: true });
+  function renderPreview() {
+    preview.replaceChildren();
+    explicitField.hidden = true;
+    submit.disabled = true;
+    submit.textContent = 'Controlla prima l’anteprima';
+    if (!summary) return;
+    const ambiguous = needsChoice();
+    preview.append(h('h3', {}, `Riepilogo del ${dateKey}`),
+      h('dl', { class: 'csv-counts' },
+        h('div', {}, h('dt', {}, 'Righe del giorno'), h('dd', {}, summary.matchedRows)),
+        h('div', {}, h('dt', {}, 'Duplicati esclusi'), h('dd', {}, summary.duplicateRows)),
+        h('div', {}, h('dt', {}, 'Tipi da verificare'), h('dd', {}, summary.unknownTypes.length)),
+        h('div', {}, h('dt', {}, 'Righe non interpretabili'), h('dd', {}, summary.invalidRows))),
+      h('p', {}, summary.type ? `Attività riconosciute: ${typeLabel(summary.type)}.` : 'Nessuna attività riconosciuta per questa data. Il risultato non dimostra un giorno di riposo.'));
+    if (summary.unknownTypes.length) preview.append(h('p', { class: 'helper' }, 'Tipi non riconosciuti: ', summary.unknownTypes.slice(0, 10).map(type => String(type).slice(0, 100)).join(', ')));
+    if (ambiguous) {
+      preview.append(h('p', { class: 'csv-attention' }, 'Il file non consente una registrazione automatica completa. Verifica questa data e scegli esplicitamente l’attività svolta, oppure annulla. Le righe con data non interpretabile non possono essere assegnate a un giorno.'));
+      explicitField.hidden = false;
+    }
+    explicitType.required = ambiguous;
+    const selected = selectedType();
+    if (!typeLabel(selected)) return;
+    const existing = data.days[dateKey]?.trainingLog;
+    if (existing) preview.append(h('p', { class: 'csv-attention' }, `Questa conferma sostituirà la registrazione esistente: ${trainingLogLabel(existing)}.`));
+    submit.textContent = existing ? `Sostituisci ${trainingLogLabel(existing)} con ${typeLabel(selected)} · ${dateKey}` : `Registra ${typeLabel(selected)} per ${dateKey}`;
+    submit.disabled = false;
+  }
+  function updateSummary() {
+    summary = null; error.textContent = ''; explicitType.value = '';
+    if (!parsed || !dateColumn || !typeColumn || !timeBasis.value) { renderPreview(); return; }
+    if (Number(dateColumn.value) < 0 || Number(typeColumn.value) < 0) { renderPreview(); return; }
+    try {
+      if (dateColumn.value === typeColumn.value) throw new Error('Scegli colonne distinte per data e tipo di attività.');
+      if (Number(idColumn.value) >= 0 && [dateColumn.value, typeColumn.value].includes(idColumn.value)) throw new Error('La colonna ID deve essere distinta da data e tipo, oppure scegli nessuna colonna ID.');
+      summary = summarizeActivityCsv(parsed, { dateKey, dateColumn: Number(dateColumn.value), typeColumn: Number(typeColumn.value), idColumn: Number(idColumn.value), timeBasis: timeBasis.value, timeZone: 'Europe/Rome' });
+      if (summary.dateKey !== dateKey) throw new Error('Il riepilogo non corrisponde alla data selezionata.');
+    } catch (failure) { summary = null; error.textContent = failure.message; }
+    renderPreview();
+  }
+  const fileInput = h('input', { type: 'file', accept: '.csv,text/csv', name: 'activityCsv', onchange: async event => {
+    const file = event.target.files?.[0];
+    const version = ++readVersion;
+    parsed = null; summary = null; error.textContent = ''; mapping.hidden = true; fileStatus.textContent = ''; explicitType.value = ''; timeBasis.value = ''; renderPreview();
+    if (!file) return;
+    try {
+      if (file.size > 5 * 1024 * 1024) throw new Error('Scegli un CSV non superiore a 5 MiB.');
+      if (file.name && !file.name.toLowerCase().endsWith('.csv')) throw new Error('Scegli il file CSV delle attività, non un archivio ZIP o un altro formato.');
+      const content = await file.text();
+      if (version !== readVersion || !$('#app-dialog').open) return;
+      parsed = parseActivityCsv(content);
+      const suggested = suggestActivityColumns(parsed.headers);
+      const columnSelect = (name, selection, optional = false) => h('select', { name, onchange: updateSummary },
+        h('option', { value: '-1', selected: selection < 0 }, optional ? 'Nessuna colonna ID' : 'Scegli la colonna…'),
+        ...parsed.headers.map((header, index) => h('option', { value: index, selected: selection === index }, `${index + 1}. ${header}`)));
+      dateColumn = columnSelect('csvDateColumn', suggested.dateColumn);
+      typeColumn = columnSelect('csvTypeColumn', suggested.typeColumn);
+      idColumn = columnSelect('csvIdColumn', suggested.idColumn, true);
+      mapping.replaceChildren(h('div', { class: 'form-grid' }, field('Colonna della data', dateColumn), field('Colonna del tipo', typeColumn), field('Colonna ID · facoltativa', idColumn)), field('Interpretazione delle date · obbligatoria', timeBasis, 'Se il file non dichiara il fuso, controlla se gli orari sono locali italiani o UTC. La scelta non è preselezionata.'));
+      mapping.hidden = false;
+      fileStatus.textContent = `${parsed.rows.length} ${parsed.rows.length === 1 ? 'riga letta' : 'righe lette'}. Controlla le colonne suggerite e scegli come interpretare le date.`;
+      updateSummary();
+    } catch (failure) { if (version !== readVersion) return; parsed = null; summary = null; error.textContent = failure.message; renderPreview(); }
+  } });
+  container.append(dialogHeading('Importa attività da CSV', `Solo il giorno ${dateKey}. Nessun dato viene caricato su un server.`),
+    h('div', { class: 'csv-sync-info' }, h('strong', {}, 'Sincronizzazione automatica non attiva'),
+      h('p', {}, 'La creazione di un’app API Strava richiede un abbonamento. Con l’account gratuito puoi usare l’export dei tuoi dati. Gli allenamenti Hevy già inviati a Strava possono essere letti da questo file.'),
+      h('a', { href: 'https://developers.strava.com/docs/getting-started/', target: '_blank', rel: 'noopener noreferrer' }, 'Requisiti API Strava'), ' · ',
+      h('a', { href: 'https://support.strava.com/en-us/articles/15401919-how-do-i-export-my-strava-data', target: '_blank', rel: 'noopener noreferrer' }, 'Come esportare i dati')),
+    field('File CSV delle attività · massimo 5 MiB', fileInput), fileStatus, mapping, preview, explicitField, error,
+    h('p', { class: 'helper' }, 'Viene salvato soltanto il tipo di attività per questa data, con provenienza CSV Strava. Il contenuto del file resta in memoria durante l’importazione e non entra nel backup. Pasti e calorie non cambiano.'),
+    h('div', { class: 'dialog-actions' }, button('Annulla', closeDialog), submit));
+  showDialog(container);
+  $('#app-dialog').addEventListener('close', () => { readVersion += 1; parsed = null; summary = null; fileInput.value = ''; }, { once: true });
+}
+
 function renderToday() {
   if (!data.profile || storageReadError) return renderOnboarding();
   const day = getDay();
@@ -160,14 +314,15 @@ function renderToday() {
   return h('div', { class: 'page today-page' },
     pageTitle('IL TUO DIARIO', selectedDate === localDate() ? 'Oggi, un passo alla volta.' : longDate(selectedDate),
       h('span', { class: 'day-subtitle' }, h('span', {}, longDate(selectedDate)), button('Vai ai pasti ↓', goToMeals, 'button primary small', { 'aria-controls': 'daily-meals-title' })), dateNavigation),
+    renderTrainingLog(day, activity),
     selectedDate >= localDate() && profileKey(day.profileSnapshot) !== profileKey(data.profile) && day.meals.some(meal => !day.consumed[meal.id] && !day.skipped.includes(meal.id)) && h('section', { class: 'notice profile-change-notice' }, h('strong', {}, 'Questo giorno usa ancora il profilo precedente.'), h('p', {}, 'Il nuovo profilo è salvato. Puoi applicarlo ai piani da oggi in poi, mantenendo i pasti già registrati.'), button('Applica il profilo ai piani', applyProfileToPlans)),
     renderEnergyContext(day.targets),
     h('section', { class: 'daily-overview', 'aria-label': 'Bilancio del giorno' },
       h('div', { class: 'energy-hero' },
-        h('div', { class: 'overview-topline' }, h('span', { class: 'caps' }, 'ENERGIA CONSUMATA'), h('span', { class: 'day-badge' }, training ? `${activity.label} · ${activity.time}` : activity.label)),
+        h('div', { class: 'overview-topline' }, h('span', { class: 'caps' }, 'ENERGIA CONSUMATA'), h('span', { class: 'day-badge', title: 'Allenamento previsto dal profilo', 'aria-label': `Allenamento previsto: ${activity.label}${activity.time ? ` alle ${activity.time}` : ''}` }, training ? `${activity.label} · ${activity.time}` : activity.label)),
         h('div', { class: 'energy-value' }, h('strong', {}, round(consumed.kcal)), h('span', {}, 'kcal')),
         h('div', { class: 'energy-track', role: 'meter', 'aria-label': 'Calorie consumate rispetto all’obiettivo', 'aria-valuemin': 0, 'aria-valuemax': Math.max(day.targets.kcal, consumed.kcal), 'aria-valuenow': consumed.kcal, 'aria-valuetext': `${round(consumed.kcal)} consumate su ${round(day.targets.kcal)} kcal obiettivo` }, h('span', { style: `width:${Math.min(100, consumed.kcal / day.targets.kcal * 100)}%` })),
-        h('div', { class: 'energy-footer' }, h('span', {}, remaining >= 0 ? `${round(remaining)} kcal all’obiettivo` : `${round(-remaining)} kcal oltre l’obiettivo`), h('span', {}, allEaten ? 'Giornata registrata ✓' : `${Object.keys(day.consumed).length} pasti registrati`))),
+        h('div', { class: 'energy-footer' }, h('span', {}, remaining >= 0 ? `${round(remaining)} kcal all’obiettivo` : `${round(-remaining)} kcal oltre l’obiettivo`), h('span', {}, allEaten ? 'Pasti registrati ✓' : `${Object.keys(day.consumed).length} ${Object.keys(day.consumed).length === 1 ? 'pasto registrato' : 'pasti registrati'}`))),
       h('div', { class: 'energy-details' },
         h('div', {}, h('span', { class: 'caps' }, 'OBIETTIVO STIMATO'), h('strong', {}, round(day.targets.kcal), h('small', {}, ' kcal')), h('p', {}, 'Dal profilo di questo giorno')),
         h('div', {}, h('span', { class: 'caps' }, 'PIANIFICATO'), h('strong', {}, round(planned.kcal), h('small', {}, ' kcal')), h('p', {}, `${planned.kcal >= day.targets.kcal ? '+' : '−'}${round(Math.abs(planned.kcal - day.targets.kcal))} kcal rispetto all’obiettivo`)))),

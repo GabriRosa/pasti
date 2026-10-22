@@ -1,5 +1,5 @@
-import { calculateTargets } from './nutrition.js?v=20261023-deficit';
-import { validateTrainingPlan } from './training.js?v=20261023-deficit';
+import { calculateTargets } from './nutrition.js?v=20261023-activity';
+import { validateTrainingPlan, validateTrainingLog } from './training.js?v=20261023-activity';
 
 /** Local-only, versioned persistence. All writes validate before replacing data. */
 export const STORAGE_KEY = 'pasti.data.v1';
@@ -95,11 +95,12 @@ function targets(value) {
   value.warnings.forEach(warning => text(warning, 2000, 'avviso.', true));
 }
 function day(value, key) {
-  keys(value, ['dateKey', 'createdAt', 'updatedAt', 'profileSnapshot', 'targets', 'meals', 'consumed', 'skipped'], 'giorno');
+  keys(value, ['dateKey', 'createdAt', 'updatedAt', 'profileSnapshot', 'targets', 'meals', 'consumed', 'skipped', 'trainingLog'], 'giorno');
   dateKey(key);
   if (value.dateKey !== key) fail('data non corrispondente.');
   timestamp(value.createdAt); timestamp(value.updatedAt);
   validateProfile(value.profileSnapshot); targets(value.targets);
+  try { validateTrainingLog(value.trainingLog); } catch (error) { fail(error.message); }
   if (!Array.isArray(value.meals) || value.meals.length < 1 || value.meals.length > 4) fail('pasti del giorno.');
   value.meals.forEach(meal);
   const ids = value.meals.map(item => item.id);

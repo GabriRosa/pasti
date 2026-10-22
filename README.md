@@ -8,6 +8,10 @@ Al primo accesso inserisci età, peso, altezza, sesso usato nella formula, attiv
 
 L’orario iniziale degli allenamenti è 06:00. Puoi alternare corsa e sala attrezzi ogni giorno, scegliendo una data di riferimento e la prima attività, oppure assegnare corsa, sala attrezzi o riposo ai giorni della settimana. L’alternanza prosegue anche tra settimane e mesi. Il piano distingue uno spuntino facoltativo prima dell’allenamento dalla colazione successiva; seguono pranzo e cena.
 
+Nella scheda **Attività svolta** scegli **Palestra**, **Corsa**, **Palestra + corsa** oppure **Riposo** per la data aperta. Il programma previsto resta separato dalla registrazione effettiva. Puoi correggere o annullare la scelta per oggi e per i giorni passati; i giorni futuri restano da registrare. La scelta viene conservata nel diario senza modificare pasti, deficit o calorie: il consumo medio include già gli allenamenti abituali.
+
+**Importa attività da CSV** legge localmente il file delle attività esportato da Strava e propone una registrazione per il solo giorno aperto. Conferma le colonne e come interpretare gli orari, controlla l’anteprima e applica il risultato. I tipi generici e le righe non interpretabili richiedono una scelta esplicita. Non è una sincronizzazione automatica. Vedi [collegamenti e importazione](docs/integrations.md) per requisiti e limiti.
+
 Il diario mostra obiettivo stimato, quantità pianificate e quantità consumate. Apri **Modifica porzioni e alternative** per cambiare un pasto o i grammi, poi **Segna mangiato** per registrarlo. La registrazione si può annullare. I giorni futuri si possono pianificare; la registrazione diventa disponibile dalla data scelta.
 
 Le alternative comprendono i carboidrati richiesti (pasta, riso, couscous, patate e pasta di lenticchie), pollo, uova, albumi, salmone, tonno e filetto di maiale. Le colazioni includono budino e mousse proteici, yogurt greco con cioccolato fuso e altre proposte.
@@ -48,7 +52,7 @@ Apri `http://127.0.0.1:8766/`. Per eseguire i test, usa Node.js 22 o successivo:
 node --test tests/*.test.mjs
 ```
 
-[domain.test.mjs](tests/domain.test.mjs) verifica calcoli, porzioni e sostituzioni. [integration.test.mjs](tests/integration.test.mjs) verifica persistenza e flussi applicativi con DOM e storage in memoria. I test automatici non sostituiscono la verifica visuale del browser.
+[domain.test.mjs](tests/domain.test.mjs) verifica calcoli, porzioni e sostituzioni. [activity-import.test.mjs](tests/activity-import.test.mjs) verifica la lettura e l’aggregazione dei CSV. [integration.test.mjs](tests/integration.test.mjs) verifica persistenza e flussi applicativi con DOM e storage in memoria. I test automatici non sostituiscono la verifica visuale del browser.
 
 ## Pubblicazione
 

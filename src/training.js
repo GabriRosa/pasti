@@ -2,6 +2,43 @@ const DAY_MS = 86400000;
 const TYPES = ['rest', 'run', 'strength'];
 const LABELS = { rest: 'Riposo', run: 'Corsa', strength: 'Sala attrezzi' };
 
+export const TRAINING_LOG_TYPES = Object.freeze([
+  { id: 'strength', label: 'Palestra' },
+  { id: 'run', label: 'Corsa' },
+  { id: 'both', label: 'Palestra + corsa' },
+  { id: 'rest', label: 'Riposo' },
+].map(Object.freeze));
+
+function isISOTimestamp(value) {
+  if (typeof value !== 'string') return false;
+  const match = /^(\d{4}-\d{2}-\d{2})T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,9})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/.exec(value);
+  if (!match || !Number.isFinite(Date.parse(value))) return false;
+  const calendar = new Date(`${match[1]}T00:00:00Z`);
+  return Number.isFinite(calendar.getTime()) && calendar.toISOString().slice(0, 10) === match[1];
+}
+
+export function validateTrainingLog(log) {
+  if (log === undefined) return undefined;
+  const keys = ['type', 'source', 'recordedAt'];
+  if (!log || typeof log !== 'object' || Array.isArray(log)
+    || keys.some(key => !Object.hasOwn(log, key)) || Object.keys(log).some(key => !keys.includes(key))) {
+    throw new Error('La registrazione dell’attività deve contenere tipo, sorgente e data di registrazione.');
+  }
+  if (!TRAINING_LOG_TYPES.some(item => item.id === log.type)) {
+    throw new Error('Scegli un’attività svolta valida: palestra, corsa, entrambe o riposo.');
+  }
+  if (!['manual', 'strava_csv'].includes(log.source)) throw new Error('La sorgente della registrazione deve essere manuale oppure importazione CSV Strava.');
+  if (!isISOTimestamp(log.recordedAt)) {
+    throw new Error('La data di registrazione deve essere un timestamp ISO valido con ora e fuso orario.');
+  }
+  return log;
+}
+
+export function trainingLogLabel(log) {
+  const validated = validateTrainingLog(log);
+  return validated === undefined ? '' : TRAINING_LOG_TYPES.find(item => item.id === validated.type).label;
+}
+
 function calendarDay(dateKey) {
   if (typeof dateKey !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
     throw new Error('La data di allenamento deve avere formato AAAA-MM-GG.');
