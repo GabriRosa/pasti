@@ -1,8 +1,9 @@
-import { getFood, foodMacros } from './foods.js?v=20261023-lidl';
-import { calculateTargets, sumMacros } from './nutrition.js?v=20261023-lidl';
+import { getFood, foodMacros } from './foods.js?v=20261023-deficit';
+import { calculateTargets, sumMacros } from './nutrition.js?v=20261023-deficit';
+import { trainingForDate } from './training.js?v=20261023-deficit';
 
 export const MEAL_SLOTS = Object.freeze([
-  { id: 'preworkout', label: 'Prima della palestra · facoltativo' },
+  { id: 'preworkout', label: 'Prima dell’allenamento · facoltativo' },
   { id: 'breakfast', label: 'Colazione' },
   { id: 'lunch', label: 'Pranzo' },
   { id: 'dinner', label: 'Cena' },
@@ -64,7 +65,7 @@ function breakfastOptions(kcal, base, overrides) {
     const grams = clamp((kcal - fixedKcal) * 100 / cerealKcal, low, high);
     return previewMeal('breakfast', title, [...fixed, ingredient(cerealId, grams)], note, overrides, base);
   };
-  const timing = 'Colazione dopo l’allenamento nei giorni di palestra. Orario indicativo, da adattare alla fine della seduta. ';
+  const timing = 'Colazione dopo l’allenamento nei giorni attivi. Orario indicativo, da adattare alla fine della seduta. ';
   const pudding = (id, flavour) => build(`Budino Milbona ${flavour}, avena e banana`,
     [ingredient(id, getFood(id, overrides).label.packGrams), ingredient('banana', 100), ingredient('dark-chocolate', 10)], 'oats', 20, 100,
     timing + `3 minuti. Un vasetto da ${getFood(id, overrides).label.packGrams} g; puoi modificare la quantità. Avena secca, da mescolare o mangiare a parte.`);
@@ -86,7 +87,7 @@ function breakfastOptions(kcal, base, overrides) {
 }
 
 function snackOptions(base, overrides) {
-  const note = 'Facoltativo, 15–30 minuti prima della palestra. Porzione piccola: adatta alla tua tolleranza o saltala.';
+  const note = 'Facoltativo, 15–30 minuti prima dell’allenamento. Porzione piccola: adatta alla tua tolleranza o saltala.';
   return [
     previewMeal('preworkout', 'Una piccola banana', [ingredient('banana', 100)], '1 minuto. ' + note, overrides, base),
     previewMeal('preworkout', 'Gallette con confettura', [ingredient('rice-cakes', 16), ingredient('jam', 10)], '2 minuti. Circa 2 gallette, verifica il peso. ' + note, overrides, base),
@@ -255,9 +256,9 @@ export function createDayPlan(profile, targets, dateKey, overrides = {}) {
   sumMacros([targets]);
   if (targets.kcal <= 0) throw new Error('L’obiettivo calorico deve essere maggiore di zero.');
   const number = dayNumber(dateKey);
-  const weekday = new Date(number * 86400000).getUTCDay();
-  const training = (profile.trainingDays ?? []).includes(weekday);
-  const trainingMinutes = clockMinutes(profile.trainingTime ?? '06:00');
+  const session = trainingForDate(profile, dateKey);
+  const training = session.type !== 'rest';
+  const trainingMinutes = clockMinutes(session.time || profile.trainingTime || '06:00');
   const meals = [];
   const base = slot => ({ id: `${dateKey}-${slot}`, slot, time: slot === 'lunch' ? '13:00' : slot === 'dinner' ? '20:00' : '08:00' });
   if (training && profile.includePreworkout !== false) {
@@ -269,7 +270,7 @@ export function createDayPlan(profile, targets, dateKey, overrides = {}) {
   const breakfastBase = { ...base('breakfast'), time: training && trainingMinutes < 9 * 60 ? clockTime(trainingMinutes + 90) : '08:00' };
   const breakfasts = breakfastOptions(targets.kcal * 0.27, breakfastBase, overrides);
   let breakfast = breakfasts[rotation(number, breakfasts.length)];
-  if (training && trainingMinutes >= 9 * 60) breakfast = { ...breakfast, note: breakfast.note.replace('Colazione dopo l’allenamento nei giorni di palestra.', 'Con l’orario scelto, questa colazione precede la palestra; sposta il pasto secondo la tua routine.') };
+  if (training && trainingMinutes >= 9 * 60) breakfast = { ...breakfast, note: breakfast.note.replace('Colazione dopo l’allenamento nei giorni attivi.', 'Con l’orario scelto, questa colazione precede l’allenamento; sposta il pasto secondo la tua routine.') };
   meals.push(breakfast);
   const consumed = sumMacros(meals.map(meal => meal.macros));
   const remaining = Object.fromEntries(['kcal', 'protein', 'carbs', 'fat'].map(key => [key, Math.max(0, targets[key] - consumed[key]) / 2]));

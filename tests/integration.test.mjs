@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { calculateTargets, sumMacros } from '../src/nutrition.js';
 import { FOODS, LIDL_FOOD_IDS, getFood, foodMacros } from '../src/foods.js';
 import { createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } from '../src/planner.js';
@@ -325,6 +326,7 @@ class MemoryElement {
   }
   set value(value) { this._value = String(value); }
   get valueAsNumber() { return this.value === '' ? NaN : Number(this.value); }
+  get isDisabled() { return Boolean(this.disabled || (this.parentNode && this.parentNode.isDisabled)); }
   get isConnected() { return this.tagName === 'BODY' || Boolean(this.parentNode?.isConnected); }
   get classList() {
     return {
@@ -354,15 +356,22 @@ class MemoryElement {
     this.events.get(name).push(listener);
   }
   dispatch(name, extra = {}) {
-    const event = { target: this, preventDefault() {}, ...extra };
-    for (const listener of this.events.get(name) || []) listener(event);
+    const event = { target: this, bubbles: true, cancelBubble: false, preventDefault() {},
+      stopPropagation() { this.cancelBubble = true; }, ...extra };
+    let current = this;
+    do {
+      event.currentTarget = current;
+      for (const listener of current.events.get(name) || []) listener(event);
+      current = event.bubbles && !event.cancelBubble ? current.parentNode : null;
+    } while (current);
   }
-  click() { if (!this.disabled) this.dispatch('click'); }
+  click() { if (!this.isDisabled) this.dispatch('click'); }
   focus() { globalThis.document.activeElement = this; }
   scrollIntoView() {}
   showModal() { this.open = true; }
-  close() { this.open = false; this.dispatch('close'); }
+  close() { this.open = false; this.dispatch('close', { bubbles: false }); }
   checkValidity() {
+    if (this.isDisabled) return true;
     if (this.required && this.value === '') return false;
     if (this.attributes.type === 'number' && this.value !== '') {
       const value = this.valueAsNumber;
@@ -424,7 +433,7 @@ async function bootApp(t, store, hash = 'today') {
   const location = { hash: `#${hash}` };
   class MemoryFormData {
     constructor(form) {
-      this.pairs = form.querySelectorAll('input, select').filter(control => control.attributes.name
+      this.pairs = form.querySelectorAll('input, select').filter(control => !control.isDisabled && control.attributes.name
         && !(control.attributes.type === 'checkbox' && !control.checked))
         .map(control => [control.attributes.name, control.attributes.type === 'checkbox' ? control.value || 'on' : control.value]);
     }
@@ -891,4 +900,421 @@ test('a quota failure during refresh preserves stored data and displays an unsav
   assert.equal(store.writes, 1);
   assert.equal(document.querySelector('#notifications').children[0].attributes.role, 'alert');
   assert.ok(document.querySelector('.notice.danger'));
+});
+
+const trainingModule = () => import('../src/training.js');
+
+function alternatingProfile(changes = {}) {
+  return { ...profile(), goal: 'lose', deficitKcal: 250, trainingDays: [0, 1, 2, 3, 4, 5, 6],
+    trainingPlan: { mode: 'alternating', startDate: '2026-10-23', firstType: 'run' }, ...changes };
+}
+
+test('explicit deficits survive storage and subtract exactly 0, 250 or 500 kcal from TDEE', () => {
+  for (const deficitKcal of [0, 250, 500]) {
+    const subject = alternatingProfile({ deficitKcal });
+    const targets = calculateTargets(subject);
+    assert.equal(targets.bmr, 1755);
+    assert.equal(targets.tdee, 2720.25);
+    assert.equal(targets.kcal, 2720.25 - deficitKcal);
+    assert.equal(targets.tdee - targets.kcal, deficitKcal);
+    assert.equal(targets.protein, deficitKcal === 0 ? 128 : 144);
+    const data = createEmptyData(); data.profile = subject;
+    const store = new MemoryStorage(); saveData(data, store);
+    const restored = loadData(store).data;
+    assert.deepEqual(restored.profile, subject);
+    assert.equal(calculateTargets(restored.profile).kcal, targets.kcal);
+  }
+});
+
+test('legacy v1 profiles and snapshots round-trip without acquiring new defaults', () => {
+  const data = generatedDiary('2026-10-23');
+  data.profile.goal = 'lose';
+  const previous = clone(data);
+  const store = new MemoryStorage(); saveData(data, store);
+  const restored = parseBackup(exportBackup(loadData(store).data));
+  assert.equal(restored.schemaVersion, 1);
+  assert.deepEqual(restored, previous);
+  assert.equal(Object.hasOwn(restored.profile, 'deficitKcal'), false);
+  assert.equal(Object.hasOwn(restored.profile, 'trainingPlan'), false);
+  assert.equal(Object.hasOwn(restored.days['2026-10-23'].profileSnapshot, 'trainingPlan'), false);
+  assert.equal(calculateTargets(restored.profile).kcal, 2448.225);
+  assert.deepEqual(data, previous);
+});
+
+test('new profile fields coexist with unchanged legacy historical snapshots in a v1 backup', () => {
+  const data = generatedDiary('2026-10-22');
+  const historical = clone(data.days['2026-10-22']);
+  data.profile = alternatingProfile();
+  const targets = calculateTargets(data.profile);
+  data.days['2026-10-23'] = { ...day('2026-10-23'), profileSnapshot: clone(data.profile), targets,
+    meals: createDayPlan(data.profile, targets, '2026-10-23') };
+  const store = new MemoryStorage(); saveData(data, store);
+  const restored = parseBackup(exportBackup(loadData(store).data));
+  assert.equal(restored.schemaVersion, 1);
+  assert.deepEqual(restored, data);
+  assert.deepEqual(restored.days['2026-10-22'], historical);
+});
+
+test('invalid explicit deficits are rejected rather than clipped or persisted', () => {
+  const store = new MemoryStorage();
+  const original = generatedDiary(); saveData(original, store);
+  const before = store.getItem(STORAGE_KEY);
+  for (const value of [-1, NaN, Infinity, -Infinity, '250', null, 2720.25, 3000]) {
+    assert.throws(() => calculateTargets(alternatingProfile({ deficitKcal: value })), String(value));
+    for (const target of ['profile', 'snapshot']) {
+      const invalid = clone(original);
+      const changed = target === 'profile' ? invalid.profile : invalid.days['2026-10-23'].profileSnapshot;
+      changed.goal = 'lose'; changed.deficitKcal = value;
+      assert.throws(() => saveData(invalid, store));
+      assert.equal(store.getItem(STORAGE_KEY), before);
+    }
+  }
+  assert.equal(store.writes, 1);
+  const clinical = alternatingProfile({ specialCondition: true });
+  assert.throws(() => calculateTargets(clinical));
+  const underweight = alternatingProfile({ weight: 45, height: 180, deficitKcal: 250 });
+  let protectedTargets;
+  try {
+    protectedTargets = calculateTargets(underweight);
+  } catch (error) {
+    assert.ok(error instanceof Error);
+    return;
+  }
+  assert.equal(protectedTargets.kcal, protectedTargets.tdee);
+  assert.ok(protectedTargets.warnings.some(warning => /deficit|sottopeso/i.test(warning)));
+});
+
+test('weekly and alternating plans round-trip and malformed nested fields cannot replace stored data', () => {
+  const store = new MemoryStorage();
+  const initial = generatedDiary(); saveData(initial, store);
+  for (const plan of [
+    { mode: 'alternating', startDate: '2026-10-23', firstType: 'run' },
+    { mode: 'weekly', days: ['rest', 'strength', 'run', 'rest', 'strength', 'run', 'rest'] },
+  ]) {
+    const data = clone(initial); data.profile.trainingPlan = plan;
+    data.profile.trainingDays = plan.mode === 'weekly' ? [1, 2, 4, 5] : [0, 1, 2, 3, 4, 5, 6];
+    saveData(data, store);
+    assert.deepEqual(parseBackup(exportBackup(loadData(store).data)), data);
+  }
+  const before = store.getItem(STORAGE_KEY);
+  const writes = store.writes;
+  for (const plan of [
+    null, {}, { mode: 'other' },
+    { mode: 'alternating', startDate: '2026-02-30', firstType: 'run' },
+    { mode: 'alternating', startDate: '1899-12-31', firstType: 'run' },
+    { mode: 'alternating', startDate: '2101-01-01', firstType: 'run' },
+    { mode: 'alternating', startDate: '2026-10-23', firstType: 'rest' },
+    { mode: 'alternating', startDate: '2026-10-23', firstType: 'run', extra: true },
+    { mode: 'weekly', days: ['rest', 'run'] },
+    { mode: 'weekly', days: ['rest', 'run', 'strength', 'run', 'rest', 'run', 'cycling'] },
+  ]) {
+    for (const target of ['profile', 'snapshot']) {
+      const data = clone(initial);
+      (target === 'profile' ? data.profile : data.days['2026-10-23'].profileSnapshot).trainingPlan = plan;
+      assert.throws(() => saveData(data, store), JSON.stringify(plan));
+      assert.equal(store.getItem(STORAGE_KEY), before);
+    }
+  }
+  assert.equal(store.writes, writes);
+});
+
+test('alternation crosses Sunday, month and year boundaries and works before its anchor', async () => {
+  const { trainingForDate, validateTrainingPlan } = await trainingModule();
+  assert.doesNotThrow(() => validateTrainingPlan(undefined));
+  const subject = alternatingProfile();
+  for (const [date, type] of [
+    ['2026-10-20', 'strength'], ['2026-10-21', 'run'], ['2026-10-22', 'strength'],
+    ['2026-10-23', 'run'], ['2026-10-24', 'strength'], ['2026-10-25', 'run'], ['2026-10-26', 'strength'],
+    ['2026-10-31', 'run'], ['2026-11-01', 'strength'],
+  ]) {
+    const session = trainingForDate(subject, date);
+    assert.equal(session.type, type, date);
+    assert.equal(session.time, '06:00');
+    assert.equal(typeof session.label, 'string');
+    assert.ok(session.label.length > 0);
+  }
+  const december = alternatingProfile({ trainingPlan: { mode: 'alternating', startDate: '2026-12-30', firstType: 'strength' } });
+  for (const [date, type] of [['2026-12-29', 'run'], ['2026-12-30', 'strength'], ['2026-12-31', 'run'], ['2027-01-01', 'strength']]) {
+    assert.equal(trainingForDate(december, date).type, type, date);
+  }
+  for (const date of ['2026-02-30', '2026-13-01', '2026-1-01', '1899-12-31', '2101-01-01']) {
+    assert.throws(() => trainingForDate(subject, date), date);
+  }
+});
+
+test('weekly plans distinguish run and strength while legacy trainingDays remain strength sessions', async () => {
+  const { trainingForDate } = await trainingModule();
+  const legacy = profile();
+  assert.equal(trainingForDate(legacy, '2026-10-23').type, 'strength');
+  assert.equal(trainingForDate(legacy, '2026-10-25').type, 'rest');
+  const weekly = { ...profile(), trainingDays: [1, 2, 4, 5], trainingPlan:
+    { mode: 'weekly', days: ['rest', 'strength', 'run', 'rest', 'strength', 'run', 'rest'] } };
+  for (const [date, type] of [['2026-10-25', 'rest'], ['2026-10-26', 'strength'], ['2026-10-27', 'run'], ['2026-10-28', 'rest']]) {
+    assert.equal(trainingForDate(weekly, date).type, type, date);
+  }
+});
+
+test('calendar alternation is stable across the Italian daylight-saving transitions', async () => {
+  await trainingModule();
+  const cases = [
+    { startDate: '2026-03-28', dates: ['2026-03-28', '2026-03-29', '2026-03-30', '2026-03-31'] },
+    { startDate: '2026-10-24', dates: ['2026-10-24', '2026-10-25', '2026-10-26', '2026-10-27'] },
+  ];
+  const url = new URL('../src/training.js', import.meta.url).href;
+  const script = `import {trainingForDate} from ${JSON.stringify(url)};
+const base=${JSON.stringify(profile())};
+const cases=${JSON.stringify(cases)};
+console.log(JSON.stringify(cases.map(row=>row.dates.map(date=>trainingForDate({...base,trainingPlan:{mode:'alternating',startDate:row.startDate,firstType:'run'}},date).type))));`;
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+    env: { ...process.env, TZ: 'Europe/Rome' }, encoding: 'utf8', timeout: 5000,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), [
+    ['run', 'strength', 'run', 'strength'], ['run', 'strength', 'run', 'strength'],
+  ]);
+});
+
+test('run and strength use the same TDEE and food quantities without exercise calories added twice', () => {
+  const running = alternatingProfile({ trainingPlan: { mode: 'alternating', startDate: '2026-10-23', firstType: 'run' } });
+  const strength = alternatingProfile({ trainingPlan: { mode: 'alternating', startDate: '2026-10-23', firstType: 'strength' } });
+  const runTargets = calculateTargets(running);
+  const strengthTargets = calculateTargets(strength);
+  assert.equal(runTargets.tdee, 2720.25);
+  assert.deepEqual(runTargets, strengthTargets);
+  const quantities = meal => ({ slot: meal.slot, ingredients: meal.ingredients, macros: meal.macros });
+  assert.deepEqual(createDayPlan(running, runTargets, '2026-10-23').map(quantities),
+    createDayPlan(strength, strengthTargets, '2026-10-23').map(quantities));
+});
+
+test('weekly rest removes only the preworkout schedule without changing the energy target', () => {
+  const subject = alternatingProfile({ trainingDays: [1, 2], trainingPlan:
+    { mode: 'weekly', days: ['rest', 'run', 'strength', 'rest', 'rest', 'rest', 'rest'] } });
+  const targets = calculateTargets(subject);
+  const slots = date => createDayPlan(subject, targets, date).map(item => item.slot);
+  assert.deepEqual(slots('2026-10-25'), ['breakfast', 'lunch', 'dinner']);
+  assert.deepEqual(slots('2026-10-26'), ['preworkout', 'breakfast', 'lunch', 'dinner']);
+  assert.deepEqual(slots('2026-10-27'), ['preworkout', 'breakfast', 'lunch', 'dinner']);
+  assert.equal(targets.tdee, 2720.25);
+  assert.equal(targets.kcal, 2470.25);
+});
+
+function setProfileControl(form, name, value) {
+  const control = form.querySelector(`[name="${name}"]`);
+  assert.ok(control, `Missing profile control: ${name}`);
+  control.value = String(value); control.dispatch('change');
+  return control;
+}
+
+function displayedEstimateNumbers(document) {
+  return document.querySelectorAll('.estimate-steps strong').map(element => {
+    const digits = element.textContent.replace(/[^0-9]/g, '');
+    return digits === '' ? null : Number(digits);
+  });
+}
+
+test('onboarding offers daily alternation and shows live rest, TDEE and explicit deficit estimates', async t => {
+  const store = new MemoryStorage();
+  const { document } = await bootApp(t, store);
+  const form = document.querySelector('.profile-form');
+  assert.equal(form.querySelector('[name="trainingMode"]').value, 'alternating');
+  assert.equal(form.querySelector('[name="trainingTime"]').value, '06:00');
+  for (const [name, value] of Object.entries({ age: 35, sex: 'male', weight: 80, height: 180, activity: 'moderate', goal: 'lose' })) {
+    setProfileControl(form, name, value);
+  }
+  assert.deepEqual(displayedEstimateNumbers(document), [1755, 2720, null]);
+  form.dispatch('submit');
+  assert.equal(store.getItem(STORAGE_KEY), null, 'A missing deficit cannot silently become a default');
+  for (const deficit of [500, 250, 0]) {
+    setProfileControl(form, 'deficitKcal', deficit);
+    assert.deepEqual(displayedEstimateNumbers(document), [1755, 2720, Math.round(2720.25 - deficit)]);
+    assert.equal(store.writes, 0, 'Live previews must not write the profile');
+  }
+  form.dispatch('submit');
+  const result = loadData(store).data;
+  assert.equal(result.profile.deficitKcal, 0);
+  assert.deepEqual(result.profile.trainingPlan, { mode: 'alternating', startDate: todayKey(), firstType: 'run' });
+  assert.deepEqual(result.profile.trainingDays, [0, 1, 2, 3, 4, 5, 6]);
+  assert.equal(result.days[todayKey()].targets.kcal, 2720.25);
+});
+
+test('opening a legacy profile preserves its weekly schedule and exposes the converted deficit before saving', async t => {
+  const key = todayKey();
+  const data = generatedDiary(key);
+  data.profile = { ...profile(), goal: 'lose' };
+  const historical = clone(data.days[key]);
+  const store = new MemoryStorage(); saveData(data, store);
+  const before = store.getItem(STORAGE_KEY);
+  const { document } = await bootApp(t, store, 'profile');
+  const form = document.querySelector('.profile-form');
+  assert.equal(form.querySelector('[name="trainingMode"]').value, 'weekly');
+  assert.equal(form.querySelector('[name="deficitKcal"]').valueAsNumber, 272);
+  for (let day = 0; day < 7; day += 1) {
+    assert.equal(form.querySelector(`[name="trainingDay-${day}"]`).value, [1, 3, 5].includes(day) ? 'strength' : 'rest');
+  }
+  assert.equal(store.getItem(STORAGE_KEY), before);
+  form.dispatch('submit');
+  const result = loadData(store).data;
+  assert.equal(result.profile.deficitKcal, 272);
+  assert.deepEqual(result.profile.trainingDays, [1, 3, 5]);
+  assert.deepEqual(result.profile.trainingPlan, { mode: 'weekly', days: ['rest', 'strength', 'rest', 'strength', 'rest', 'strength', 'rest'] });
+  assert.deepEqual(result.days[key], historical);
+});
+
+test('weekly profile controls save run and strength separately and label newly opened days', async t => {
+  const key = todayKey();
+  const data = generatedDiary(key);
+  const store = new MemoryStorage(); saveData(data, store);
+  const { document, navigate } = await bootApp(t, store, 'profile');
+  const form = document.querySelector('.profile-form');
+  setProfileControl(form, 'trainingMode', 'weekly');
+  for (let day = 0; day < 7; day += 1) setProfileControl(form, `trainingDay-${day}`, day === 0 ? 'run' : day === 1 ? 'strength' : 'rest');
+  form.dispatch('submit');
+  const saved = loadData(store).data;
+  assert.deepEqual(saved.profile.trainingDays, [0, 1]);
+  assert.deepEqual(saved.profile.trainingPlan, { mode: 'weekly', days: ['run', 'strength', 'rest', 'rest', 'rest', 'rest', 'rest'] });
+  navigate('today');
+  const { trainingForDate } = await trainingModule();
+  for (const date of ['2027-01-03', '2027-01-04']) {
+    const picker = document.querySelector('input[type="date"]');
+    picker.value = date; picker.dispatch('change');
+    const session = trainingForDate(saved.profile, date);
+    assert.equal(document.querySelector('.day-badge').textContent, `${session.label} · ${session.time}`);
+    assert.equal(loadData(store).data.days[date].targets.tdee, saved.days[key].targets.tdee);
+  }
+});
+
+test('invalid deficit entries in the profile form leave the saved profile unchanged', async t => {
+  const data = generatedDiary(todayKey());
+  const store = new MemoryStorage(); saveData(data, store);
+  const initialJSON = store.getItem(STORAGE_KEY);
+  const { document } = await bootApp(t, store, 'profile');
+  const form = document.querySelector('.profile-form');
+  setProfileControl(form, 'goal', 'lose');
+  for (const deficit of ['', '-1', '2720.25', '3000']) {
+    setProfileControl(form, 'deficitKcal', deficit);
+    form.dispatch('submit');
+    assert.equal(store.getItem(STORAGE_KEY), initialJSON, deficit);
+  }
+  assert.equal(store.writes, 1);
+});
+
+function profileApplicationFixture() {
+  const key = todayKey();
+  const pastKey = dateOffset(key, -1);
+  const futureKey = dateOffset(key, 1);
+  const data = generatedDiary(key);
+  data.days[pastKey] = generatedDiary(pastKey).days[pastKey];
+  data.days[futureKey] = generatedDiary(futureKey).days[futureKey];
+  data.foodOverrides.vegetables = { kcal: 23, protein: 2, carbs: 3, fat: 0.2 };
+  const today = data.days[key];
+  const breakfast = today.meals.find(item => item.slot === 'breakfast');
+  today.consumed[breakfast.id] = { consumedAt: new Date().toISOString(), meal: clone(breakfast) };
+  today.skipped = [today.meals.find(item => item.slot === 'preworkout').id];
+  const futureLunch = data.days[futureKey].meals.find(item => item.slot === 'lunch');
+  futureLunch.ingredients[0].grams += 12;
+  Object.assign(futureLunch, mealFromIngredients(futureLunch));
+  return { data, key, pastKey, futureKey, newProfile: { ...data.profile, goal: 'lose', deficitKcal: 500,
+    trainingPlan: { mode: 'alternating', startDate: key, firstType: 'strength' } } };
+}
+
+test('saving an explicit deficit leaves existing days intact until profile application is confirmed', async t => {
+  const { data, key, pastKey, futureKey, newProfile } = profileApplicationFixture();
+  const store = new MemoryStorage(); saveData(data, store);
+  const { document, navigate } = await bootApp(t, store, 'profile');
+  const form = document.querySelector('.profile-form');
+  for (const [name, value] of Object.entries({ goal: 'lose', deficitKcal: 500, trainingMode: 'alternating',
+    trainingStart: key, trainingFirst: 'strength' })) setProfileControl(form, name, value);
+  form.dispatch('submit');
+  const savedOnly = loadData(store).data;
+  assert.deepEqual(savedOnly.profile, newProfile);
+  assert.deepEqual(savedOnly.days, data.days);
+  assert.deepEqual(savedOnly.foodOverrides, data.foodOverrides);
+  document.querySelector('.profile-change-notice button').click();
+  assert.equal(document.querySelector('#app-dialog').open, true);
+  assert.deepEqual(loadData(store).data, savedOnly);
+  document.querySelector('.dialog-actions button.secondary').click();
+  assert.deepEqual(loadData(store).data, savedOnly);
+  document.querySelector('.profile-change-notice button').click();
+  document.querySelector('.dialog-actions button.primary').click();
+  const actual = loadData(store).data;
+  assert.deepEqual(Object.keys(actual.days).sort(), Object.keys(data.days).sort());
+  assert.deepEqual(actual.days[pastKey], data.days[pastKey]);
+  assert.deepEqual(actual.days[key].consumed, data.days[key].consumed);
+  assert.deepEqual(actual.foodOverrides, data.foodOverrides);
+  const targets = calculateTargets(newProfile);
+  for (const date of [key, futureKey]) {
+    const before = data.days[date];
+    const after = actual.days[date];
+    assert.deepEqual(after.profileSnapshot, newProfile);
+    assert.deepEqual(after.targets, targets);
+    assert.equal(after.createdAt, before.createdAt);
+    assert.notEqual(after.updatedAt, before.updatedAt);
+    const expectedPlan = createDayPlan(newProfile, targets, date, data.foodOverrides);
+    for (const item of after.meals) {
+      if (before.consumed[item.id]) {
+        assert.deepEqual(item, before.meals.find(old => old.id === item.id));
+      } else {
+        const expectedMeal = expectedPlan.find(generated => generated.slot === item.slot);
+        assert.deepEqual(item.ingredients, expectedMeal.ingredients);
+        assertMacrosClose(item.macros, sumMacros(item.ingredients.map(ingredient => foodMacros(ingredient.foodId, ingredient.grams, data.foodOverrides))));
+      }
+    }
+  }
+  assert.deepEqual(actual.days[key].skipped, data.days[key].skipped);
+  assert.notDeepEqual(actual.days[futureKey].meals, data.days[futureKey].meals);
+  navigate('profile');
+  const afterJSON = store.getItem(STORAGE_KEY);
+  document.querySelector('.target-preview button').click();
+  assert.equal(document.querySelector('#app-dialog').open, false);
+  assert.equal(store.getItem(STORAGE_KEY), afterJSON, 'Applying an identical profile must preserve the current plan');
+});
+
+test('applying a profile skips fully consumed days even when their profile snapshot differs', async t => {
+  const key = todayKey();
+  const data = generatedDiary(key);
+  for (const item of data.days[key].meals) data.days[key].consumed[item.id] = {
+    consumedAt: new Date().toISOString(), meal: clone(item),
+  };
+  data.profile = alternatingProfile({ trainingPlan: { mode: 'alternating', startDate: key, firstType: 'run' } });
+  const store = new MemoryStorage(); saveData(data, store);
+  const beforeJSON = store.getItem(STORAGE_KEY);
+  const { document } = await bootApp(t, store, 'profile');
+  document.querySelector('.target-preview button').click();
+  assert.equal(document.querySelector('#app-dialog').open, false);
+  assert.equal(store.getItem(STORAGE_KEY), beforeJSON);
+  assert.equal(store.writes, 1);
+});
+
+test('a profile application conflict cannot overwrite consumption recorded by another tab', async t => {
+  const { data, key, newProfile } = profileApplicationFixture();
+  data.profile = newProfile;
+  const store = new MemoryStorage(); saveData(data, store);
+  const { document, window } = await bootApp(t, store, 'profile');
+  document.querySelector('.target-preview button').click();
+  const external = loadData(store).data;
+  const dinner = external.days[key].meals.find(item => item.slot === 'dinner');
+  external.days[key].consumed[dinner.id] = { consumedAt: new Date().toISOString(), meal: clone(dinner) };
+  saveData(external, store);
+  const externalJSON = store.getItem(STORAGE_KEY);
+  window.dispatch('storage', { key: STORAGE_KEY });
+  document.querySelector('.dialog-actions button.primary').click();
+  assert.equal(store.getItem(STORAGE_KEY), externalJSON);
+  assert.equal(store.writes, 2);
+});
+
+test('switching an existing day to rest preserves an already consumed preworkout', async t => {
+  const key = todayKey();
+  const data = generatedDiary(key);
+  const snack = data.days[key].meals.find(item => item.slot === 'preworkout');
+  data.days[key].consumed[snack.id] = { consumedAt: new Date().toISOString(), meal: clone(snack) };
+  const consumed = clone(data.days[key].consumed);
+  data.profile = alternatingProfile({ trainingDays: [], trainingPlan: { mode: 'weekly', days: Array(7).fill('rest') } });
+  const store = new MemoryStorage(); saveData(data, store);
+  const { document } = await bootApp(t, store, 'profile');
+  document.querySelector('.target-preview button').click();
+  document.querySelector('.dialog-actions button.primary').click();
+  const after = loadData(store).data.days[key];
+  assert.deepEqual(after.consumed, consumed);
+  assert.deepEqual(after.meals.find(item => item.id === snack.id), snack);
+  assert.deepEqual(after.profileSnapshot.trainingPlan.days, Array(7).fill('rest'));
 });

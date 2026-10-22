@@ -1,6 +1,6 @@
 # Calcoli, alimenti e porzioni
 
-Pasti genera stime per adulti sani e proposte di pasti modificabili. [nutrition.js](../src/nutrition.js) calcola gli obiettivi, [foods.js](../src/foods.js) conserva i valori per 100 g e [planner.js](../src/planner.js) compone le porzioni. I valori del diario derivano sempre dai grammi degli ingredienti, comprese le proteine di pasta, avena e legumi.
+Pasti genera stime per adulti sani e proposte di pasti modificabili. [nutrition.js](../src/nutrition.js) calcola gli obiettivi, [training.js](../src/training.js) determina l’attività del giorno, [foods.js](../src/foods.js) conserva i valori per 100 g e [planner.js](../src/planner.js) compone le porzioni. I valori del diario derivano sempre dai grammi degli ingredienti, comprese le proteine di pasta, avena e legumi.
 
 ## Energia e macronutrienti
 
@@ -14,7 +14,7 @@ tdee = riposo × fattore_attività
 
 Il campo API `bmr` contiene questa stima del dispendio a riposo, non una misurazione del metabolismo basale. Il parametro `sex` rappresenta il sesso biologico utilizzato dai coefficienti della formula; non descrive l’identità di genere. Lo studio originale comprendeva adulti sani di 19–78 anni: a 18 anni e oltre 78 l’app segnala l’estrapolazione.
 
-I fattori di attività sono convenzioni operative dell’app e comprendono già movimento quotidiano e allenamenti. Il numero di giorni selezionati decide la presenza dello spuntino, senza aggiungere calorie al fabbisogno.
+I fattori di attività sono convenzioni operative dell’app e comprendono già movimento quotidiano, corsa e sala attrezzi. Il TDEE è una media giornaliera: il tipo e la presenza dell’allenamento decidono il programma e lo spuntino, senza aggiungere calorie al fabbisogno. Durata e intensità della singola seduta non vengono stimate.
 
 | ID attività | Fattore |
 | --- | ---: |
@@ -24,9 +24,13 @@ I fattori di attività sono convenzioni operative dell’app e comprendono già 
 | `active` | 1,725 |
 | `very-active` | 1,9 |
 
-L’obiettivo `maintain` usa il TDEE, `lose` il 90% e `gain` il 105%. Il deficit del 10% e il surplus del 5% sono scelte moderate dell’app, non valori prescritti dall’equazione né promesse di variazione del peso. Gli obiettivi restano uguali nei giorni di riposo.
+Il risultato distingue tre numeri: `bmr` è il dispendio a riposo stimato, `tdee` il dispendio totale giornaliero medio, `kcal` l’obiettivo alimentare. Con `goal: 'lose'` e `deficitKcal` esplicito, l’obiettivo è esattamente `tdee - deficitKcal`, senza arrotondamenti intermedi. Un deficit di 0 kcal usa il mantenimento. L’oggetto Targets mantiene gli stessi campi; la differenza `tdee - kcal` mostra il deficit applicato.
 
-Le proteine sono impostate a 1,6 g/kg per mantenimento e aumento, a 1,8 g/kg durante il deficit. Sono punti di partenza entro l’intervallo 1,4–2,0 g/kg riportato dalla [posizione ISSN su proteine ed esercizio](https://doi.org/10.1186/s12970-017-0177-8) per la maggior parte degli adulti sani che si allenano. L’app non distingue durata, volume o tipo di allenamento e non stima il fabbisogno di un atleta individuale.
+`deficitKcal` accetta un numero finito non negativo; stringhe, valori mancanti esplicitamente come `null` e altri tipi vengono rifiutati. Per dimagrimento, un deficit maggiore o uguale al TDEE viene rifiutato. Se il campo è assente, il vecchio profilo conserva il deficit automatico del 10%. `maintain` usa il TDEE e `gain` il 105%: per questi obiettivi un eventuale deficit numericamente valido non viene applicato. Gli obiettivi restano uguali nei giorni di riposo, corsa e sala attrezzi.
+
+Per esempio, con 80 kg, 180 cm, 35 anni, sesso maschile e attività `moderate`, il riposo stimato è 1.755 kcal e il TDEE 2.720,25 kcal. Un deficit scelto di 250 kcal produce 2.470,25 kcal; 500 kcal produce 2.220,25 kcal. Il calcolo non impone un nuovo tetto clinico al deficit: restano gli avvisi per stime caloriche fuori scala e la valutazione individuale quando necessaria.
+
+Le proteine sono impostate a 1,6 g/kg per mantenimento e aumento, a 1,8 g/kg durante un deficit effettivo positivo. Un deficit di 0 usa quindi 1,6 g/kg. Sono punti di partenza entro l’intervallo 1,4–2,0 g/kg riportato dalla [posizione ISSN su proteine ed esercizio](https://doi.org/10.1186/s12970-017-0177-8) per la maggior parte degli adulti sani che si allenano. L’app non assegna fabbisogni diversi alla corsa e alla sala attrezzi e non stima quelli di un atleta individuale.
 
 La ripartizione lascia il 30% dell’energia ai grassi e assegna il residuo ai carboidrati. Le proteine sono limitate al 35% dell’energia, con un avviso quando questo limite riduce i grammi per kg. Il 30%, il limite del 35% e la quota residua sono regole di composizione dell’app: non costituiscono target clinici esatti. Per questa sola ripartizione si usano 4 kcal/g per proteine e carboidrati e 9 kcal/g per grassi.
 
@@ -34,7 +38,7 @@ La ripartizione lascia il 30% dell’energia ai grassi e assegna il residuo ai c
 
 Il calcolatore accetta età 18–100 anni, peso 35–250 kg e altezza 130–230 cm. Rifiuta numeri mancanti, negativi, non finiti e scelte sconosciute. Questi limiti validano l’input e non garantiscono l’idoneità del piano.
 
-Con `specialCondition: true` il calcolo si interrompe: gravidanza, allattamento, patologie e disturbi alimentari richiedono una valutazione individuale. Con BMI inferiore a 18,5 l’app mostra un avviso e disattiva il deficit; con BMI da 30 segnala i limiti della stima. Il BMI serve qui solo come controllo grossolano, non come diagnosi. Anche risultati sotto 1.500 o sopra 3.500 kcal producono un avviso; queste sono soglie di revisione del software, non minimi o massimi alimentari universali.
+Con `specialCondition: true` il calcolo si interrompe: gravidanza, allattamento, patologie e disturbi alimentari richiedono una valutazione individuale. Con BMI inferiore a 18,5, un deficit esplicito positivo viene rifiutato con un messaggio che indica il mantenimento e la valutazione individuale; un deficit di 0 resta accettato con avviso. Per compatibilità, un vecchio profilo senza `deficitKcal` continua a ricevere la stima di mantenimento con l’avviso che il deficit automatico è disattivato. Con BMI da 30 viene segnalato il limite della stima. Il BMI serve qui solo come controllo grossolano, non come diagnosi. Anche risultati sotto 1.500 o sopra 3.500 kcal producono un avviso; queste sono soglie di revisione del software, non minimi o massimi alimentari universali.
 
 ## Catalogo e fonti
 
@@ -85,13 +89,38 @@ La verifica del 23 ottobre 2026 riguarda le confezioni documentate, non ogni lot
 
 ## Giornata e alternative
 
+### Calendario condiviso degli allenamenti
+
+`trainingForDate(profile, dateKey)` restituisce `{type, label, time}`. I tipi sono `run` (“Corsa”), `strength` (“Sala attrezzi”) e `rest` (“Riposo”). Le attività usano `profile.trainingTime`, oppure le 06:00 se l’orario è assente; per riposo `time` è una stringa vuota. Il calcolo non modifica il profilo e non riscrive gli snapshot del diario.
+
+`validateTrainingPlan(plan)` accetta `undefined` oppure una delle due forme seguenti. Restituisce il piano invariato quando valido e genera un errore leggibile negli altri casi.
+
+```js
+// Tutti i giorni: corsa il 23 ottobre, sala il 24, corsa il 25, e così via.
+trainingPlan: {
+  mode: 'alternating',
+  startDate: '2026-10-23',
+  firstType: 'run'
+}
+
+// Settimana personalizzata, domenica in posizione 0.
+trainingPlan: {
+  mode: 'weekly',
+  days: ['rest', 'run', 'strength', 'run', 'strength', 'run', 'strength']
+}
+```
+
+L’alternanza usa la differenza tra giorni di calendario UTC, per evitare effetti dell’ora legale. Prosegue attraverso domenica/lunedì, mesi e anni e funziona anche prima della data di riferimento: un giorno prima usa il tipo opposto, due giorni prima lo stesso tipo. Date di riferimento e date richieste devono essere reali e comprese tra 1900 e 2100. La settimana personalizzata richiede esattamente sette tipi validi.
+
+Quando `trainingPlan` è presente, determina l’attività; `trainingDays` resta il campo compatibile con i vecchi profili. In assenza del piano, i giorni di `trainingDays` vengono interpretati come sala attrezzi e gli altri come riposo. L’interfaccia deriva `trainingDays` dai giorni attivi quando salva un nuovo piano. Il planner usa lo stesso helper dell’interfaccia per evitare calendari divergenti.
+
 `createDayPlan(profile, targets, dateKey, overrides)` interpreta la data come giorno di calendario, con domenica uguale a 0. Il parsing usa componenti UTC solo per evitare spostamenti di giorno dovuti al fuso; l’input è la data locale scelta dall’utente. Date impossibili o fuori dall’intervallo 1900–2100 vengono rifiutate.
 
-La stessa data e gli stessi input producono gli stessi piatti. Il giorno seleziona a rotazione una delle sette colazioni, uno dei tre spuntini e combinazioni diverse per pranzo e cena. Nei giorni di allenamento il preworkout è previsto 15 minuti prima e può essere saltato nell’interfaccia. Per la palestra alle 06:00 gli orari iniziali sono 05:45 e 07:30; la colazione va spostata secondo la fine effettiva della seduta. Con un allenamento da mezzanotte alle 00:14, la nota avverte che lo spuntino cade la sera precedente.
+La stessa data e gli stessi input producono gli stessi piatti. Il giorno seleziona a rotazione una delle sette colazioni, uno dei tre spuntini e combinazioni diverse per pranzo e cena. Nei giorni di corsa o sala attrezzi il preworkout è previsto 15 minuti prima e può essere saltato nell’interfaccia. Per l’allenamento alle 06:00 gli orari iniziali sono 05:45 e 07:30; la colazione va spostata secondo la fine effettiva della seduta. Con un allenamento da mezzanotte alle 00:14, la nota avverte che lo spuntino cade la sera precedente.
 
 Le colazioni comprendono i due gusti di budino con avena e banana, i due gusti di mousse con pane e confettura, yogurt greco con cioccolato fuso, toast con uova e yogurt, yogurt con avena e banana. Ogni dessert usa `label.packGrams` per il vasetto; cambia la quota di cereale d’accompagnamento. Le alternative preworkout sono piccola banana, gallette con confettura, pane con confettura. Sono porzioni da circa 75–90 kcal prima di eventuali override, da adattare alla tolleranza personale.
 
-Per allenamenti dalle 09:00 in poi l’app conserva la colazione alle 08:00 e chiarisce che precede la palestra. Il modello non ricostruisce una giornata sportiva a partire dalla durata di una seduta, che non viene richiesta.
+Per allenamenti dalle 09:00 in poi l’app conserva la colazione alle 08:00 e chiarisce che precede l’allenamento. Il modello non ricostruisce una giornata sportiva a partire dalla durata di una seduta, che non viene richiesta.
 
 La colazione parte da circa il 27% dell’energia. Pranzo riceve metà dei nutrienti rimasti; cena parte dal residuo effettivo dopo pranzo. Se un pasto non può raggiungere l’energia prevista, il generatore prova a distribuire il residuo nell’altro, mantenendo il vincolo proteico. Se resta una differenza calorica oltre il 5%, prova un altro carboidrato tra quelli disponibili. Questa scelta riguarda il piano iniziale; tutte le combinazioni restano selezionabili.
 
@@ -106,6 +135,8 @@ Per esempio, un pasto con 80 g di pasta di semola, 170 g di pollo, 200 g di verd
 ## Test del dominio
 
 [domain.test.mjs](../tests/domain.test.mjs) controlla formula numerica, ripartizione energetica, limiti del profilo, catalogo, personalizzazione delle etichette, calendario, riposo, porzioni e ricalcolo delle sostituzioni. Le prove su pasta secca e fresca di lenticchie verificano la riduzione del pollo, le proteine del pane e cambi consecutivi; quella sul salmone verifica anche l’olio. Una matrice di profili e giorni controlla i nutrienti di ogni ingrediente e delle 36 alternative. Una seconda matrice verifica uno scostamento calorico entro il 5% in 168 scenari ordinari.
+
+I test sul deficit coprono 0, 250, 500 kcal, numeri non validi, soglia TDEE, sottopeso e retrocompatibilità. Quelli sull’allenamento coprono alternanza, giorni precedenti al riferimento, domenica/lunedì, fine mese, cambio d’anno, bisestile, ora legale e identità dei macro fra corsa e sala attrezzi. Gli import dei moduli del dominio usano la versione asset `v=20261023-deficit`.
 
 ```sh
 node --test tests/domain.test.mjs

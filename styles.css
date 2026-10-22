@@ -19,6 +19,7 @@
   text-rendering: optimizeLegibility;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html { scroll-behavior: smooth; }
 body { margin: 0; background: var(--bg); color: var(--ink); line-height: 1.5; }
 button, input, select, textarea { font: inherit; }
@@ -104,6 +105,24 @@ main:focus { outline: none; }
 .energy-details small { font-size: .7rem; letter-spacing: normal; font-weight: 400; color: #d5dfcf; }
 .energy-details p { font-size: .67rem; color: #c1d0bc; margin: 5px 0 0; }
 .macro-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 16px 0 36px; }
+.daily-estimates { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
+.daily-estimates > div { padding: 12px 15px; border-left: 2px solid #c5d4b2; }
+.daily-estimates span, .estimate-steps span { display: block; font-size: .7rem; color: var(--ink-soft); }
+.daily-estimates strong { display: block; font-size: 1.08rem; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 3px; }
+.live-estimates { background: #edf2e2; padding: 18px; border-radius: 13px; margin: 0 0 25px; }
+.estimate-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.estimate-steps strong { display: block; font-size: 1.1rem; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 7px; }
+.live-estimates .estimate-warning { border-top: 1px solid #d9e2cb; padding-top: 7px; }
+.full-width { grid-column: 1 / -1; margin-top: 0; }
+.weekly-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }
+.training-preview { padding: 14px 16px; border-radius: 12px; background: #f0f2e8; margin-bottom: 25px; }
+.training-preview > .helper { margin: 0 0 10px; }
+.training-preview ul { list-style: none; margin: 0; padding: 0; }
+.training-preview li { display: grid; grid-template-columns: 1fr 1.2fr auto; gap: 12px; align-items: baseline; padding: 6px 0; font-size: .72rem; border-top: 1px solid #dde3d3; }
+.training-preview li > span { color: var(--ink-soft); }
+.training-preview strong { font-weight: 570; }
+.training-preview small { font-size: .68rem; }
+.target-preview > p { font-size: .8rem; }
 .macro-card { background: var(--paper); padding: 21px 23px 17px; border: 1px solid var(--line); border-radius: 17px; }
 .macro-title { font-size: .75rem; display: flex; align-items: center; gap: 8px; }
 .macro-dot { width: 7px; height: 7px; border-radius: 50%; background: #708351; }
@@ -353,6 +372,14 @@ dialog::backdrop { background: #14251b77; backdrop-filter: blur(3px); }
   .today-page .macro-grid { gap: 7px; margin-top: 11px; margin-bottom: 23px; }
   .today-page .macro-card { padding: 12px 11px; border-radius: 13px; }
   .macro-title { font-size: .61rem; gap: 6px; }
+  .daily-estimates { gap: 4px; margin-bottom: 14px; }
+  .daily-estimates > div { padding: 8px 9px; }
+  .daily-estimates span { font-size: .58rem; }
+  .daily-estimates strong { font-size: .88rem; }
+  .estimate-steps { grid-template-columns: 1fr; gap: 12px; }
+  .estimate-steps > div { display: flex; justify-content: space-between; align-items: center; gap: 15px; }
+  .estimate-steps strong { margin: 0; font-size: 1rem; white-space: nowrap; }
+  .estimate-steps span { font-size: .66rem; }
   .macro-dot { width: 5px; height: 5px; }
   .macro-number { margin: 9px 0 11px; white-space: normal; line-height: 1.2; }
   .macro-number strong { font-size: 1.5rem; }

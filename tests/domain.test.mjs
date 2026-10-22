@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ACTIVITY_LEVELS, calculateTargets, sumMacros } from '../src/nutrition.js';
-import { FOODS, LIDL_FOOD_IDS, getFood, foodMacros } from '../src/foods.js';
-import { MEAL_SLOTS, createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } from '../src/planner.js';
+import { ACTIVITY_LEVELS, calculateTargets, sumMacros } from '../src/nutrition.js?v=20261023-deficit';
+import { FOODS, LIDL_FOOD_IDS, getFood, foodMacros } from '../src/foods.js?v=20261023-deficit';
+import { MEAL_SLOTS, createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } from '../src/planner.js?v=20261023-deficit';
+import { trainingForDate, validateTrainingPlan } from '../src/training.js?v=20261023-deficit';
 
 const profile = { age: 35, sex: 'male', weight: 80, height: 180, activity: 'moderate', goal: 'lose', trainingTime: '06:00', trainingDays: [1, 3, 5], specialCondition: false };
 const close = (actual, expected, tolerance = 1e-8) => assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} != ${expected}`);
@@ -346,4 +347,129 @@ test('verified label values retain each recipe and the 100 g basis independently
     close(portion.protein, values[1] * values[4] / 100);
     close(portion.kcal, values[0] * values[4] / 100);
   }
+});
+
+test('explicit deficits 0, 250 and 500 are subtracted exactly from the same TDEE', () => {
+  for (const deficitKcal of [0, 250, 500, 250.5]) {
+    const result = calculateTargets({ ...profile, deficitKcal });
+    close(result.bmr, 1755);
+    close(result.tdee, 2720.25);
+    close(result.kcal, 2720.25 - deficitKcal);
+    close(result.tdee - result.kcal, deficitKcal);
+    close(result.protein, deficitKcal === 0 ? 128 : 144);
+    close(result.protein * 4 + result.carbs * 4 + result.fat * 9, result.kcal);
+    assert.match(result.method, new RegExp(`TDEE − ${deficitKcal} kcal`));
+  }
+  for (const goal of ['maintain', 'gain']) {
+    assert.deepEqual(calculateTargets({ ...profile, goal, deficitKcal: 500 }), calculateTargets({ ...profile, goal }));
+  }
+  close(calculateTargets(profile).kcal, 2720.25 * 0.9);
+  close(calculateTargets({ ...profile, deficitKcal: undefined }).kcal, 2720.25 * 0.9);
+});
+
+test('invalid deficits and deficits at least as large as TDEE are rejected without clamping', () => {
+  for (const deficitKcal of [-1, NaN, Infinity, -Infinity, '250', null, false, [], 2720.25, 3000]) {
+    assert.throws(() => calculateTargets({ ...profile, deficitKcal }), /deficit/i);
+  }
+  const low = calculateTargets({ ...profile, deficitKcal: 2000 });
+  close(low.kcal, 720.25);
+  assert.ok(low.warnings.some(warning => warning.includes('stima calorica')));
+  close(calculateTargets({ ...profile, deficitKcal: 2719.75 }).kcal, 0.5);
+});
+
+test('explicit deficits preserve the special-condition and underweight boundaries', () => {
+  assert.throws(() => calculateTargets({ ...profile, specialCondition: true, deficitKcal: 0 }), /professionista/);
+  assert.throws(() => calculateTargets({ ...profile, weight: 45, deficitKcal: 250 }), /sottopeso/);
+  const underweight = calculateTargets({ ...profile, weight: 45, deficitKcal: 0 });
+  close(underweight.kcal, underweight.tdee);
+  assert.ok(underweight.warnings.some(warning => warning.includes('sottopeso')));
+  const legacy = calculateTargets({ ...profile, weight: 45 });
+  close(legacy.kcal, legacy.tdee);
+  assert.ok(legacy.warnings.some(warning => warning.includes('disattivato')));
+  const highBMI = calculateTargets({ ...profile, weight: 120, deficitKcal: 500 });
+  close(highBMI.tdee - highBMI.kcal, 500);
+  assert.ok(highBMI.warnings.some(warning => warning.includes('rapporto peso/altezza elevato')));
+});
+
+test('alternating sessions use calendar days across Sunday, Monday and month changes', () => {
+  const alternating = { ...profile, trainingDays: [], trainingPlan: { mode: 'alternating', startDate: '2026-10-23', firstType: 'run' } };
+  const expected = [
+    ['2026-10-21', 'run'], ['2026-10-22', 'strength'], ['2026-10-23', 'run'],
+    ['2026-10-24', 'strength'], ['2026-10-25', 'run'], ['2026-10-26', 'strength'],
+    ['2026-10-31', 'run'], ['2026-11-01', 'strength'],
+  ];
+  for (const [date, type] of expected) {
+    assert.equal(trainingForDate(alternating, date).type, type, date);
+    assert.equal(trainingForDate(alternating, date).time, '06:00');
+  }
+  assert.deepEqual(trainingForDate(alternating, '2026-10-23'), { type: 'run', label: 'Corsa', time: '06:00' });
+  assert.deepEqual(trainingForDate(alternating, '2026-10-24'), { type: 'strength', label: 'Sala attrezzi', time: '06:00' });
+  const before = structuredClone(alternating);
+  validateTrainingPlan(alternating.trainingPlan);
+  calculateTargets(alternating);
+  assert.deepEqual(alternating, before);
+});
+
+test('alternation crosses leap day, year boundaries, DST and the Unix epoch', () => {
+  for (const [startDate, firstType, checks] of [
+    ['2028-02-28', 'strength', [['2028-02-29', 'run'], ['2028-03-01', 'strength']]],
+    ['2026-12-31', 'strength', [['2027-01-01', 'run'], ['2027-01-02', 'strength']]],
+    ['2026-03-28', 'run', [['2026-03-29', 'strength'], ['2026-03-30', 'run']]],
+    ['2026-10-24', 'strength', [['2026-10-25', 'run'], ['2026-10-26', 'strength']]],
+    ['1969-12-31', 'run', [['1970-01-01', 'strength'], ['1969-12-30', 'strength']]],
+  ]) {
+    const person = { ...profile, trainingPlan: { mode: 'alternating', startDate, firstType } };
+    for (const [date, expected] of checks) assert.equal(trainingForDate(person, date).type, expected, date);
+  }
+});
+
+test('weekly and legacy schedules preserve their day mapping and neutral labels', () => {
+  const weekly = { ...profile, trainingPlan: { mode: 'weekly', days: ['rest', 'run', 'strength', 'rest', 'run', 'strength', 'rest'] } };
+  assert.deepEqual(trainingForDate(weekly, '2026-10-25'), { type: 'rest', label: 'Riposo', time: '' });
+  assert.equal(trainingForDate(weekly, '2026-10-26').type, 'run');
+  assert.equal(trainingForDate(weekly, '2026-10-27').type, 'strength');
+  assert.deepEqual(trainingForDate(profile, '2026-10-23'), { type: 'strength', label: 'Sala attrezzi', time: '06:00' });
+  assert.deepEqual(trainingForDate(profile, '2026-10-22'), { type: 'rest', label: 'Riposo', time: '' });
+  assert.equal(trainingForDate({ trainingDays: [5] }, '2026-10-23').time, '06:00');
+  assert.equal(trainingForDate({ ...weekly, trainingTime: '07:15' }, '2026-10-26').time, '07:15');
+  assert.equal(validateTrainingPlan(undefined), undefined);
+});
+
+test('schedule validation rejects invalid shapes, activities, dates and sparse arrays', () => {
+  for (const plan of [null, [], 'alternating', { mode: 'daily' },
+    { mode: 'alternating', startDate: '2026-02-30', firstType: 'run' },
+    { mode: 'alternating', startDate: '2101-01-01', firstType: 'run' },
+    { mode: 'alternating', startDate: '2026-10-23', firstType: 'rest' },
+    { mode: 'alternating', startDate: '2026-10-23', firstType: 'run', days: [] },
+    { mode: 'weekly', days: ['run'] }, { mode: 'weekly', days: Array(7) },
+    { mode: 'weekly', days: ['run', 'run', 'run', 'walk', 'run', 'run', 'rest'] },
+  ]) {
+    assert.throws(() => validateTrainingPlan(plan), Error);
+    assert.throws(() => calculateTargets({ ...profile, trainingPlan: plan }), Error);
+  }
+  for (const date of ['2026-02-29', '2026-11-31', '2026-1-01', '1899-12-31', '2101-01-01']) assert.throws(() => trainingForDate(profile, date), Error);
+  assert.throws(() => trainingForDate({ ...profile, trainingTime: '24:00' }, '2026-10-23'), /orario/);
+  assert.throws(() => trainingForDate({ ...profile, trainingDays: Array(1) }, '2026-10-23'), /giorni/);
+  assert.throws(() => calculateTargets({ ...profile, trainingDays: Array(1) }), /giorni/);
+});
+
+test('running and strength have identical targets and meal macros with no extra exercise calories', () => {
+  const run = { ...profile, deficitKcal: 250, trainingPlan: { mode: 'alternating', startDate: '2026-10-23', firstType: 'run' } };
+  const strength = { ...run, trainingPlan: { ...run.trainingPlan, firstType: 'strength' } };
+  const targets = calculateTargets(run);
+  assert.deepEqual(targets, calculateTargets(strength));
+  assert.deepEqual(targets, calculateTargets({ ...profile, deficitKcal: 250, trainingDays: [] }));
+  for (const date of ['2026-10-23', '2026-10-24', '2026-10-25', '2026-10-26']) {
+    const runPlan = createDayPlan(run, targets, date);
+    const strengthPlan = createDayPlan(strength, targets, date);
+    assert.deepEqual(runPlan, strengthPlan);
+    assert.deepEqual(runPlan.map(meal => meal.slot), ['preworkout', 'breakfast', 'lunch', 'dinner']);
+    assert.equal(runPlan[0].time, '05:45');
+    assert.equal(runPlan[1].time, '07:30');
+    assert.ok(runPlan.every(meal => !/palestra/i.test(meal.note)));
+    runPlan.forEach(meal => checkMeal(meal));
+  }
+  assert.ok(MEAL_SLOTS.every(slot => !/palestra/i.test(slot.label)));
+  const weeklyRest = { ...run, trainingPlan: { mode: 'weekly', days: Array(7).fill('rest') } };
+  assert.deepEqual(createDayPlan(weeklyRest, targets, '2026-10-23').map(meal => meal.slot), ['breakfast', 'lunch', 'dinner']);
 });

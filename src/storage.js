@@ -1,3 +1,6 @@
+import { calculateTargets } from './nutrition.js?v=20261023-deficit';
+import { validateTrainingPlan } from './training.js?v=20261023-deficit';
+
 /** Local-only, versioned persistence. All writes validate before replacing data. */
 export const STORAGE_KEY = 'pasti.data.v1';
 export const SCHEMA_VERSION = 1;
@@ -46,18 +49,27 @@ function macros(value) {
   for (const key of MACRO_KEYS) number(value[key], 0, key === 'kcal' ? 100000 : 10000, key);
 }
 export function validateProfile(profile) {
-  keys(profile, ['age', 'sex', 'weight', 'height', 'activity', 'goal', 'trainingTime', 'trainingDays', 'specialCondition'], 'profilo');
+  keys(profile, ['age', 'sex', 'weight', 'height', 'activity', 'goal', 'trainingTime', 'trainingDays', 'specialCondition', 'deficitKcal', 'trainingPlan'], 'profilo');
   number(profile.age, 18, 100, 'età (18–100 anni).');
   number(profile.weight, 35, 250, 'peso (35–250 kg).');
   number(profile.height, 130, 230, 'altezza (130–230 cm).');
   if (!['male', 'female'].includes(profile.sex)) fail('sesso usato nella formula.');
   if (!['lose', 'maintain', 'gain'].includes(profile.goal)) fail('obiettivo.');
   text(profile.activity, 60, 'attività.');
-  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(profile.trainingTime)) fail('orario palestra.');
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(profile.trainingTime)) fail('orario di allenamento.');
   if (!Array.isArray(profile.trainingDays) || profile.trainingDays.length > 7 ||
       new Set(profile.trainingDays).size !== profile.trainingDays.length ||
-      profile.trainingDays.some(day => !Number.isInteger(day) || day < 0 || day > 6)) fail('giorni palestra.');
+      profile.trainingDays.some(day => !Number.isInteger(day) || day < 0 || day > 6)) fail('giorni di allenamento.');
   if (typeof profile.specialCondition !== 'boolean') fail('condizioni particolari.');
+  if (Object.hasOwn(profile, 'deficitKcal')) {
+    number(profile.deficitKcal, 0, Number.MAX_VALUE, 'deficit calorico.');
+    try { calculateTargets(profile); } catch (error) { fail(error.message); }
+  }
+  try { validateTrainingPlan(profile.trainingPlan); } catch (error) { fail(error.message); }
+  if (profile.trainingPlan !== undefined) {
+    const expected = profile.trainingPlan.mode === 'alternating' ? [0, 1, 2, 3, 4, 5, 6] : profile.trainingPlan.days.flatMap((type, index) => type === 'rest' ? [] : [index]);
+    if (expected.length !== profile.trainingDays.length || expected.some(value => !profile.trainingDays.includes(value))) fail('giorni non coerenti con il calendario di allenamento.');
+  }
   return profile;
 }
 function meal(value) {

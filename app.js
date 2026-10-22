@@ -1,7 +1,8 @@
-import { ACTIVITY_LEVELS, calculateTargets, sumMacros } from './src/nutrition.js?v=20261023-lidl';
-import { FOODS, LIDL_FOOD_IDS, getFood } from './src/foods.js?v=20261023-lidl';
-import { createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } from './src/planner.js?v=20261023-lidl';
-import { STORAGE_KEY, MAX_BACKUP_BYTES, createEmptyData, validateData, parseBackup, loadData, saveData, exportBackup, clearData } from './src/storage.js?v=20261023-lidl';
+import { ACTIVITY_LEVELS, calculateTargets, sumMacros } from './src/nutrition.js?v=20261023-deficit';
+import { FOODS, LIDL_FOOD_IDS, getFood } from './src/foods.js?v=20261023-deficit';
+import { createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } from './src/planner.js?v=20261023-deficit';
+import { trainingForDate, validateTrainingPlan } from './src/training.js?v=20261023-deficit';
+import { STORAGE_KEY, MAX_BACKUP_BYTES, createEmptyData, validateData, parseBackup, loadData, saveData, exportBackup, clearData } from './src/storage.js?v=20261023-deficit';
 
 const $ = selector => document.querySelector(selector);
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -12,6 +13,7 @@ const longDate = key => new Intl.DateTimeFormat('it-IT', { weekday: 'long', day:
 const CARBS = ['pasta', 'rice', 'couscous', 'potatoes', 'lentil-pasta-lidl', 'lentil-pasta-lidl-fresh'];
 const PROTEINS = ['chicken', 'eggs', 'egg-whites', 'salmon', 'tuna', 'pork-tenderloin'];
 const DAYS = [{ value: 1, label: 'Lun' }, { value: 2, label: 'Mar' }, { value: 3, label: 'Mer' }, { value: 4, label: 'Gio' }, { value: 5, label: 'Ven' }, { value: 6, label: 'Sab' }, { value: 0, label: 'Dom' }];
+const TRAINING_TYPES = [{ id: 'rest', label: 'Riposo' }, { id: 'run', label: 'Corsa' }, { id: 'strength', label: 'Sala attrezzi' }];
 const loaded = loadData();
 let data = loaded.data;
 let storageReadError = loaded.error;
@@ -145,7 +147,8 @@ function goToMeals() {
 function renderToday() {
   if (!data.profile || storageReadError) return renderOnboarding();
   const day = getDay();
-  const training = day.profileSnapshot.trainingDays.includes(new Date(`${selectedDate}T12:00:00`).getDay());
+  const activity = trainingForDate(day.profileSnapshot, selectedDate);
+  const training = activity.type !== 'rest';
   const planned = sumMacros(day.meals.filter(meal => !day.skipped.includes(meal.id)).map(meal => meal.macros));
   const consumed = sumMacros(Object.values(day.consumed).map(entry => entry.meal.macros));
   const allEaten = day.meals.filter(meal => !day.skipped.includes(meal.id)).every(meal => day.consumed[meal.id]);
@@ -157,9 +160,11 @@ function renderToday() {
   return h('div', { class: 'page today-page' },
     pageTitle('IL TUO DIARIO', selectedDate === localDate() ? 'Oggi, un passo alla volta.' : longDate(selectedDate),
       h('span', { class: 'day-subtitle' }, h('span', {}, longDate(selectedDate)), button('Vai ai pasti ↓', goToMeals, 'button primary small', { 'aria-controls': 'daily-meals-title' })), dateNavigation),
+    selectedDate >= localDate() && profileKey(day.profileSnapshot) !== profileKey(data.profile) && day.meals.some(meal => !day.consumed[meal.id] && !day.skipped.includes(meal.id)) && h('section', { class: 'notice profile-change-notice' }, h('strong', {}, 'Questo giorno usa ancora il profilo precedente.'), h('p', {}, 'Il nuovo profilo è salvato. Puoi applicarlo ai piani da oggi in poi, mantenendo i pasti già registrati.'), button('Applica il profilo ai piani', applyProfileToPlans)),
+    renderEnergyContext(day.targets),
     h('section', { class: 'daily-overview', 'aria-label': 'Bilancio del giorno' },
       h('div', { class: 'energy-hero' },
-        h('div', { class: 'overview-topline' }, h('span', { class: 'caps' }, 'ENERGIA CONSUMATA'), h('span', { class: 'day-badge' }, training ? `Palestra · ${day.profileSnapshot.trainingTime}` : 'Giorno di riposo')),
+        h('div', { class: 'overview-topline' }, h('span', { class: 'caps' }, 'ENERGIA CONSUMATA'), h('span', { class: 'day-badge' }, training ? `${activity.label} · ${activity.time}` : activity.label)),
         h('div', { class: 'energy-value' }, h('strong', {}, round(consumed.kcal)), h('span', {}, 'kcal')),
         h('div', { class: 'energy-track', role: 'meter', 'aria-label': 'Calorie consumate rispetto all’obiettivo', 'aria-valuemin': 0, 'aria-valuemax': Math.max(day.targets.kcal, consumed.kcal), 'aria-valuenow': consumed.kcal, 'aria-valuetext': `${round(consumed.kcal)} consumate su ${round(day.targets.kcal)} kcal obiettivo` }, h('span', { style: `width:${Math.min(100, consumed.kcal / day.targets.kcal * 100)}%` })),
         h('div', { class: 'energy-footer' }, h('span', {}, remaining >= 0 ? `${round(remaining)} kcal all’obiettivo` : `${round(-remaining)} kcal oltre l’obiettivo`), h('span', {}, allEaten ? 'Giornata registrata ✓' : `${Object.keys(day.consumed).length} pasti registrati`))),
@@ -179,7 +184,7 @@ function renderToday() {
     ...day.targets.warnings.map(warning => h('div', { class: 'notice compact' }, warning)),
     h('div', { class: 'section-heading' }, h('div', {}, h('h2', { id: 'daily-meals-title', tabindex: '-1', class: 'scroll-target' }, 'I pasti del giorno'), h('p', {}, 'Scegli le alternative. Adatta i grammi. Registra ciò che mangi.'), h('p', { class: 'weight-legend' }, 'Pesi a crudo/secco, salvo alimenti pronti. Tonno sgocciolato; uova senza guscio. Orari indicativi.')), selectedDate !== localDate() && button('Torna a oggi', () => { selectedDate = localDate(); render(); }, 'text-button')),
     h('div', { class: 'meal-list' }, ...day.meals.map((meal, index) => renderMeal(meal, day, index))),
-    !training && h('div', { class: 'rest-note' }, h('span', { 'aria-hidden': 'true' }, '☀'), h('p', {}, 'Oggi il piano prevede colazione, pranzo e cena. Il preallenamento compare solo nei giorni palestra del profilo.')),
+    !training && h('div', { class: 'rest-note' }, h('span', { 'aria-hidden': 'true' }, '☀'), h('p', {}, 'Oggi il piano prevede colazione, pranzo e cena. Il preallenamento compare nei giorni di corsa o sala attrezzi.')),
     h('p', { class: 'page-footnote' }, 'Le quantità sono una base da adattare. I valori sono stime e non una prescrizione nutrizionale. ', h('a', { href: '#method' }, 'Leggi il metodo')));
 }
 
@@ -191,9 +196,9 @@ function renderMeal(meal, day, index) {
   const eaten = Boolean(day.consumed[meal.id]);
   const skipped = day.skipped.includes(meal.id);
   const displayMeal = eaten ? day.consumed[meal.id].meal : meal;
-  const training = day.profileSnapshot.trainingDays.includes(new Date(`${day.dateKey}T12:00:00`).getDay());
-  const afterTraining = training && meal.time > day.profileSnapshot.trainingTime;
-  const slotName = ({ preworkout: 'Prima della palestra', breakfast: afterTraining ? 'Colazione dopo palestra' : 'Colazione', lunch: 'Pranzo', dinner: 'Cena' })[meal.slot];
+  const activity = trainingForDate(day.profileSnapshot, day.dateKey);
+  const afterTraining = activity.type !== 'rest' && meal.time > activity.time;
+  const slotName = ({ preworkout: 'Prima dell’allenamento', breakfast: afterTraining ? 'Colazione dopo allenamento' : 'Colazione', lunch: 'Pranzo', dinner: 'Cena' })[meal.slot];
   const future = selectedDate > localDate();
   return h('article', { class: `meal-card${eaten ? ' eaten' : ''}${skipped ? ' skipped' : ''}` },
     h('div', { class: 'meal-rail' }, h('span', { class: 'meal-index' }, eaten ? '✓' : String(index + 1).padStart(2, '0')), h('span', { class: 'meal-time', title: 'Orario indicativo', 'aria-label': `Orario indicativo: ${meal.time}` }, meal.time)),
@@ -317,15 +322,54 @@ function renderOnboarding() {
     h('div', { class: 'onboarding-layout' }, h('section', { class: 'panel profile-panel' }, renderProfileForm()),
       h('aside', { class: 'onboarding-aside' }, h('div', { class: 'leaf-mark', 'aria-hidden': 'true' }, 'p.'), h('h2', {}, 'Una base chiara.\nScelte flessibili.'),
         h('p', {}, 'Pasti in grammi, alternative semplici e un diario che distingue ciò che pianifichi da ciò che mangi.'),
-        h('ul', { class: 'check-list' }, h('li', {}, 'Palestra alle 06:00, orario modificabile'), h('li', {}, 'Preallenamento piccolo e facoltativo'), h('li', {}, 'Dati salvati soltanto in questo browser')),
+        h('ul', { class: 'check-list' }, h('li', {}, 'Corsa e sala attrezzi alle 06:00, orario modificabile'), h('li', {}, 'Preallenamento piccolo e facoltativo'), h('li', {}, 'Dati salvati soltanto in questo browser')),
         h('p', { class: 'aside-footnote' }, 'Le stime sono pensate per adulti e non sostituiscono un professionista.'))));
+}
+
+function profileKey(profile) {
+  if (!profile) return '';
+  const plan = profile.trainingPlan;
+  const schedule = !plan ? null : plan.mode === 'alternating' ? [plan.mode, plan.startDate, plan.firstType] : [plan.mode, ...plan.days];
+  return JSON.stringify([profile.age, profile.sex, profile.weight, profile.height, profile.activity, profile.goal,
+    profile.deficitKcal ?? null, profile.trainingTime, [...profile.trainingDays].sort(), schedule, profile.specialCondition]);
+}
+
+function renderEnergyContext(targets) {
+  const difference = targets.tdee - targets.kcal;
+  return h('section', { class: 'daily-estimates', 'aria-label': 'Stime del fabbisogno giornaliero' },
+    h('div', {}, h('span', {}, 'Riposo stimato'), h('strong', {}, `${round(targets.bmr)} kcal`)),
+    h('div', {}, h('span', {}, 'Consumo totale medio'), h('strong', {}, `${round(targets.tdee)} kcal`)),
+    h('div', {}, h('span', {}, difference < 0 ? 'Surplus applicato' : 'Deficit applicato'), h('strong', {}, `${round(Math.abs(difference))} kcal`)));
 }
 
 function renderProfileForm() {
   const profile = data.profile;
+  const initialPlan = profile?.trainingPlan ?? (profile
+    ? { mode: 'weekly', days: Array.from({ length: 7 }, (_, day) => profile.trainingDays.includes(day) ? 'strength' : 'rest') }
+    : { mode: 'alternating', startDate: localDate(), firstType: 'run' });
+  let legacyDeficit;
+  if (profile?.goal === 'lose' && profile.deficitKcal === undefined) {
+    try { legacyDeficit = Math.round(calculateTargets({ ...profile, goal: 'maintain' }).tdee * 0.1); } catch { /* Form will show validation errors. */ }
+  }
   const error = h('p', { class: 'form-error', role: 'alert' });
+  const preview = h('div', { class: 'live-estimates', 'aria-live': 'polite', 'aria-atomic': 'true' });
+  const trainingPreview = h('div', { class: 'training-preview', 'aria-label': 'Calendario dei prossimi sette giorni', 'aria-live': 'polite' });
   const form = h('form', { class: 'profile-form' });
   const input = (name, attrs) => h('input', { name, value: profile?.[name] ?? '', required: true, ...attrs });
+  const deficitInput = h('input', { name: 'deficitKcal', type: 'number', min: 0, step: 1, inputmode: 'numeric', value: profile?.deficitKcal ?? legacyDeficit ?? '', placeholder: 'Scegli le kcal da sottrarre' });
+  const deficitField = field('Deficit giornaliero scelto · kcal', deficitInput, 'Puoi scegliere anche 0 kcal. La scelta deve essere inferiore al consumo totale medio.');
+  const legacyNote = legacyDeficit !== undefined ? h('p', { class: 'notice compact' }, `Prima usavi il deficit automatico del 10%. La proposta convertita è ${round(legacyDeficit)} kcal: puoi modificarla e confermarla salvando il profilo.`) : null;
+  const modeSelect = h('select', { name: 'trainingMode', required: true },
+    h('option', { value: 'alternating', selected: initialPlan.mode === 'alternating' }, 'Alternanza quotidiana: corsa / sala attrezzi'),
+    h('option', { value: 'weekly', selected: initialPlan.mode === 'weekly' }, 'Settimana personalizzata'));
+  const alternating = h('div', { class: 'alternating-fields form-grid' },
+    field('Data di riferimento', h('input', { name: 'trainingStart', type: 'date', min: '1900-01-01', max: '2100-12-31', required: true, value: initialPlan.startDate ?? localDate() })),
+    field('Attività nella data di riferimento', h('select', { name: 'trainingFirst', required: true },
+      h('option', { value: 'run', selected: initialPlan.firstType !== 'strength' }, 'Corsa'), h('option', { value: 'strength', selected: initialPlan.firstType === 'strength' }, 'Sala attrezzi'))),
+    h('p', { class: 'helper full-width' }, 'Le attività si alternano ogni giorno, senza ripartire il lunedì o all’inizio del mese.'));
+  const weekly = h('fieldset', { class: 'weekly-fields days-fieldset' }, h('legend', {}, 'Attività per ciascun giorno'),
+    h('div', { class: 'weekly-grid' }, ...DAYS.map(day => field(day.label, h('select', { name: `trainingDay-${day.value}` },
+      ...TRAINING_TYPES.map(type => h('option', { value: type.id, selected: type.id === (initialPlan.days?.[day.value] ?? 'rest') }, type.label)))))));
   const fields = h('fieldset', { class: 'profile-fields', disabled: Boolean(storageReadError) },
     h('legend', { class: 'form-section-title' }, 'Le informazioni di base'),
     h('div', { class: 'form-grid' },
@@ -333,49 +377,124 @@ function renderProfileForm() {
       field('Sesso usato nella formula', h('select', { name: 'sex', required: true }, h('option', { value: '', selected: !profile }, 'Scegli…'), h('option', { value: 'female', selected: profile?.sex === 'female' }, 'Femminile'), h('option', { value: 'male', selected: profile?.sex === 'male' }, 'Maschile')), 'La formula usa un coefficiente diverso.'),
       field('Peso attuale · kg', input('weight', { type: 'number', min: 35, max: 250, step: '0.1', inputmode: 'decimal', placeholder: 'kg' })),
       field('Altezza · cm', input('height', { type: 'number', min: 130, max: 230, step: '0.1', inputmode: 'decimal', placeholder: 'cm' }))),
-    field('Attività abituale', h('select', { name: 'activity', required: true }, h('option', { value: '', selected: !profile }, 'Scegli il livello di attività…'), ...ACTIVITY_LEVELS.map(level => h('option', { value: level.id, selected: profile?.activity === level.id }, level.label))), 'Considera la tua intera settimana, allenamenti inclusi.'),
+    field('Attività abituale', h('select', { name: 'activity', required: true }, h('option', { value: '', selected: !profile }, 'Scegli il livello di attività…'), ...ACTIVITY_LEVELS.map(level => h('option', { value: level.id, selected: profile?.activity === level.id }, level.label))), 'Considera la tua intera settimana, corsa e sala attrezzi incluse. Il totale è una media quotidiana.'),
     field('Il tuo obiettivo', h('select', { name: 'goal', required: true }, h('option', { value: '', selected: !profile }, 'Scegli un obiettivo…'), ...[{ id: 'lose', name: 'Perdere peso gradualmente' }, { id: 'maintain', name: 'Mantenere il peso' }, { id: 'gain', name: 'Aumentare il peso gradualmente' }].map(goal => h('option', { value: goal.id, selected: profile?.goal === goal.id }, goal.name)))),
-    h('div', { class: 'form-divider' }), h('h2', { class: 'form-section-title' }, 'Il ritmo della palestra'),
+    deficitField, legacyNote, preview,
+    h('div', { class: 'form-divider' }), h('h2', { class: 'form-section-title' }, 'Il calendario degli allenamenti'),
     field('Orario di allenamento', h('input', { name: 'trainingTime', type: 'time', value: profile?.trainingTime || '06:00', required: true })),
-    h('fieldset', { class: 'days-fieldset' }, h('legend', {}, 'In quali giorni ti alleni?'), h('div', { class: 'day-options' }, ...DAYS.map(day => h('label', { class: 'day-option' }, h('input', { type: 'checkbox', name: 'trainingDays', value: day.value, checked: profile?.trainingDays.includes(day.value) }), h('span', {}, day.label)))), h('small', { class: 'helper' }, 'Puoi lasciare tutti i giorni liberi. Nei giorni di riposo non c’è il preallenamento.')),
+    field('Organizzazione', modeSelect), alternating, weekly, trainingPreview,
     h('label', { class: 'condition-check' }, h('input', { type: 'checkbox', name: 'specialCondition', checked: profile?.specialCondition }), h('span', {}, 'Ho una condizione clinica, sono in gravidanza o allatto.')),
     h('p', { class: 'helper' }, 'In questi casi serve una valutazione individuale prima di usare un piano alimentare.'),
-    error,
-    h('button', { type: 'submit', class: 'button primary wide' }, profile ? 'Salva profilo' : 'Crea la mia giornata'),
-    profile && h('p', { class: 'helper' }, 'Le modifiche valgono per i giorni che aprirai per la prima volta. I giorni già salvati mantengono profilo, obiettivi e pasti originali.'));
+    error, h('button', { type: 'submit', class: 'button primary wide' }, profile ? 'Salva profilo' : 'Crea la mia giornata'),
+    profile && h('p', { class: 'helper' }, 'Dopo il salvataggio puoi applicare il profilo ai piani da oggi in poi. I pasti già registrati e i giorni passati vengono conservati.'));
   form.append(fields);
+  const readProfile = (requireDeficit = true) => {
+    const values = new FormData(form);
+    const trainingPlan = values.get('trainingMode') === 'alternating'
+      ? { mode: 'alternating', startDate: values.get('trainingStart'), firstType: values.get('trainingFirst') }
+      : { mode: 'weekly', days: Array.from({ length: 7 }, (_, day) => values.get(`trainingDay-${day}`)) };
+    const candidate = {
+      age: Number(values.get('age')), sex: values.get('sex'), weight: Number(values.get('weight')), height: Number(values.get('height')),
+      activity: values.get('activity'), goal: values.get('goal'), trainingTime: values.get('trainingTime'), trainingPlan,
+      trainingDays: trainingPlan.mode === 'alternating' ? [0, 1, 2, 3, 4, 5, 6] : trainingPlan.days.flatMap((type, day) => type === 'rest' ? [] : [day]),
+      specialCondition: values.get('specialCondition') === 'on',
+    };
+    if (candidate.goal === 'lose') {
+      if (deficitInput.value === '') {
+        if (requireDeficit) throw new Error('Scegli il deficit in kcal, anche 0 se vuoi mantenere il consumo stimato.');
+      } else candidate.deficitKcal = Number(deficitInput.value);
+    }
+    return candidate;
+  };
+  const updatePreview = () => {
+    const goal = form.querySelector('[name="goal"]').value;
+    deficitField.hidden = goal !== 'lose'; deficitInput.disabled = goal !== 'lose'; deficitInput.required = goal === 'lose';
+    if (legacyNote) legacyNote.hidden = goal !== 'lose';
+    alternating.hidden = modeSelect.value !== 'alternating'; weekly.hidden = modeSelect.value !== 'weekly';
+    alternating.querySelectorAll('input, select').forEach(control => { control.disabled = alternating.hidden; });
+    weekly.querySelectorAll('select').forEach(control => { control.disabled = weekly.hidden; });
+    const values = new FormData(form);
+    try {
+      const trainingPlan = modeSelect.value === 'alternating'
+        ? { mode: 'alternating', startDate: values.get('trainingStart'), firstType: values.get('trainingFirst') }
+        : { mode: 'weekly', days: Array.from({ length: 7 }, (_, day) => values.get(`trainingDay-${day}`)) };
+      validateTrainingPlan(trainingPlan);
+      trainingPreview.replaceChildren(h('p', { class: 'helper' }, 'I prossimi sette giorni'), h('ul', {}, ...Array.from({ length: 7 }, (_, offset) => {
+        const date = new Date(); date.setHours(12, 0, 0, 0); date.setDate(date.getDate() + offset);
+        const key = localDate(date); const session = trainingForDate({ trainingPlan, trainingTime: values.get('trainingTime') }, key);
+        return h('li', {}, h('span', {}, date.toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' })), h('strong', {}, session.label), h('small', {}, session.time));
+      })));
+    } catch (failure) { trainingPreview.replaceChildren(h('p', { class: 'form-error' }, failure.message)); }
+    if (['age', 'sex', 'weight', 'height', 'activity', 'goal'].some(name => !values.get(name))) {
+      preview.replaceChildren(h('p', { class: 'helper' }, 'Completa i dati per vedere riposo stimato, consumo totale medio e obiettivo.')); return;
+    }
+    try {
+      const candidate = readProfile(false); validateTrainingPlan(candidate.trainingPlan);
+      const baselineProfile = { ...candidate, goal: 'maintain' }; delete baselineProfile.deficitKcal;
+      const baseline = calculateTargets(baselineProfile);
+      let targets; let targetError;
+      try {
+        if (goal === 'lose' && candidate.deficitKcal === undefined) throw new Error('Scegli il deficit in kcal, anche 0 se vuoi mantenere il consumo stimato.');
+        targets = calculateTargets(candidate);
+      } catch (failure) { targetError = failure.message; }
+      preview.replaceChildren(h('div', { class: 'estimate-steps' },
+        h('div', {}, h('span', {}, '1 · Riposo stimato'), h('strong', {}, `${round(baseline.bmr)} kcal`)),
+        h('div', {}, h('span', {}, '2 · Consumo totale medio'), h('strong', {}, `${round(baseline.tdee)} kcal`)),
+        h('div', {}, h('span', {}, goal === 'lose' ? '3 · Obiettivo dopo deficit' : '3 · Obiettivo giornaliero'), h('strong', {}, targets ? `${round(targets.kcal)} kcal` : '—'))),
+        targetError ? h('p', { class: 'form-error' }, targetError) : h('p', { class: 'helper' }, `Differenza applicata dal consumo totale: ${round(Math.abs(targets.tdee - targets.kcal))} kcal${targets.kcal > targets.tdee ? ' in più' : ' in meno'}. Corsa e sala attrezzi sono già comprese nel fattore di attività.`),
+        ...(targets?.warnings ?? []).map(warning => h('p', { class: 'helper estimate-warning' }, warning)));
+    } catch (failure) { preview.replaceChildren(h('p', { class: 'form-error' }, failure.message)); }
+  };
+  form.querySelectorAll('input, select').forEach(control => { control.addEventListener('input', updatePreview); control.addEventListener('change', updatePreview); });
   form.addEventListener('submit', event => {
     event.preventDefault();
     if (!form.reportValidity()) return;
-    const values = new FormData(form);
-    const nextProfile = {
-      age: Number(values.get('age')), sex: values.get('sex'), weight: Number(values.get('weight')), height: Number(values.get('height')),
-      activity: values.get('activity'), goal: values.get('goal'), trainingTime: values.get('trainingTime'),
-      trainingDays: values.getAll('trainingDays').map(Number), specialCondition: values.get('specialCondition') === 'on',
-    };
     try {
-      calculateTargets(nextProfile);
-      const next = clone(data); next.profile = nextProfile;
-      persist(next);
-      selectedDate = localDate(); location.hash = 'today'; render(); notify('Profilo salvato. La tua giornata è pronta.');
+      const nextProfile = readProfile(); validateTrainingPlan(nextProfile.trainingPlan); calculateTargets(nextProfile);
+      const next = clone(data); next.profile = nextProfile; persist(next);
+      selectedDate = localDate(); location.hash = 'today'; render();
+      if (!unsaved) notify(profile ? 'Profilo salvato. Puoi applicarlo ai piani già creati.' : 'Profilo salvato. La tua giornata è pronta.');
     } catch (failure) { error.textContent = failure.message; error.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
   });
+  updatePreview();
   return form;
 }
 
 function renderProfile() {
-  return h('div', { class: 'page' },
-    pageTitle('LE TUE INFORMAZIONI', 'Il tuo profilo.', 'Aggiorna i dati da cui partono le stime.'),
+  return h('div', { class: 'page' }, pageTitle('LE TUE INFORMAZIONI', 'Il tuo profilo.', 'Scegli il deficit e organizza corsa, sala attrezzi e riposo.'),
     h('div', { class: 'profile-layout' }, h('section', { class: 'panel profile-panel' }, renderProfileForm()),
-      h('aside', { class: 'profile-side' }, data.profile && renderTargetPreview(), renderDataTools())));
+      h('aside', { class: 'profile-side' }, data.profile && h('section', { class: 'panel target-preview' }, h('h2', {}, 'Applica il profilo salvato'),
+        h('p', {}, 'Aggiorna gli obiettivi e rigenera i pasti ancora da consumare da oggi in poi. I pasti già mangiati e i giorni passati restano invariati.'),
+        button('Applica ai piani da oggi', applyProfileToPlans, 'button primary wide'), h('p', { class: 'helper' }, 'Prima salva le modifiche al modulo.')), renderDataTools())));
 }
 
-function renderTargetPreview() {
-  const targets = calculateTargets(data.profile);
-  return h('section', { class: 'panel target-preview' }, h('p', { class: 'eyebrow' }, 'STIMA DAL PROFILO ATTUALE'), h('h2', {}, round(targets.kcal), h('small', {}, ' kcal al giorno')),
-    h('div', { class: 'target-macros' }, h('span', {}, `P ${round(targets.protein)} g`), h('span', {}, `C ${round(targets.carbs)} g`), h('span', {}, `G ${round(targets.fat)} g`)),
-    h('p', { class: 'helper' }, 'È una stima, non una prescrizione. Il diario mantiene gli obiettivi del profilo salvato per ciascun giorno.'),
-    ...targets.warnings.map(warning => h('p', { class: 'notice compact' }, warning)), h('a', { href: '#method' }, 'Come viene calcolata →'));
+function applyProfileToPlans() {
+  try {
+    if (!data.profile) throw new Error('Salva prima il profilo.');
+    if (storageReadError || storageConflict) throw new Error('Recupera o ricarica i dati prima di applicare il profilo.');
+    const next = clone(data); const today = localDate(); const targets = calculateTargets(next.profile);
+    const changedDates = [];
+    for (const [date, day] of Object.entries(next.days)) {
+      if (date < today || profileKey(day.profileSnapshot) === profileKey(next.profile) || !day.meals.some(meal => !day.consumed[meal.id] && !day.skipped.includes(meal.id))) continue;
+      const previous = day.meals;
+      const generated = createDayPlan(next.profile, targets, date, next.foodOverrides);
+      const meals = generated.map(meal => {
+        const old = previous.find(item => item.slot === meal.slot);
+        return old && day.consumed[old.id] ? old : { ...meal, id: old?.id ?? meal.id };
+      });
+      previous.filter(meal => day.consumed[meal.id] && !meals.some(item => item.id === meal.id)).forEach(meal => meals.push(meal));
+      const slots = ['preworkout', 'breakfast', 'lunch', 'dinner']; meals.sort((a, b) => slots.indexOf(a.slot) - slots.indexOf(b.slot));
+      day.meals = meals; day.profileSnapshot = clone(next.profile); day.targets = clone(targets);
+      day.skipped = day.skipped.filter(id => meals.some(meal => meal.id === id && meal.slot === 'preworkout'));
+      changedDates.push(date);
+    }
+    if (!changedDates.length) { notify('Non ci sono piani da consumare che richiedono il nuovo profilo.'); return; }
+    validateData(next);
+    confirmAction('Applicare il profilo ai piani?', `Aggiornerai ${changedDates.length} ${changedDates.length === 1 ? 'giorno' : 'giorni'} da oggi in poi. Gli obiettivi e i pasti non ancora mangiati saranno rigenerati: anche le porzioni modificate cambieranno. I pasti già registrati e i giorni passati vengono conservati.`, 'Applica profilo', () => {
+      const now = new Date().toISOString(); changedDates.forEach(date => { next.days[date].updatedAt = now; });
+      persist(next); if (!unsaved) notify('Profilo applicato. Obiettivi e pasti da consumare sono aggiornati.');
+    });
+  } catch (error) { notify(error.message, true); }
 }
 
 function downloadText(content, filename) {
@@ -546,9 +665,9 @@ function renderMethod() {
       h('p', {}, 'Peso, altezza, età e sesso usato nella formula stimano l’energia a riposo con l’equazione di ', source('Mifflin–St Jeor', 'https://doi.org/10.1093/ajcn/51.2.241'), '. Non è una misurazione del tuo metabolismo.'),
       h('p', { class: 'method-formula' }, '10 × peso in kg + 6,25 × altezza in cm − 5 × età + costante'),
       h('p', { class: 'helper' }, 'La costante è +5 per il sesso maschile e −161 per quello femminile. Lo studio originale riguarda adulti di 19–78 anni: al di fuori di quell’intervallo compare un avviso.'),
-      h('p', {}, 'Il risultato viene moltiplicato per il livello di attività che scegli. Questi fattori sono riferimenti orientativi e comprendono già la palestra:'),
+      h('p', {}, 'Il risultato viene moltiplicato per il livello di attività che scegli. Questi fattori sono riferimenti orientativi e comprendono già corsa e sala attrezzi:'),
       h('dl', { class: 'activity-factors' }, ...ACTIVITY_LEVELS.map(level => h('div', {}, h('dt', {}, level.label.split(' · ')[0]), h('dd', {}, `× ${level.factor.toLocaleString('it-IT', { maximumFractionDigits: 3 })}`)))),
-      h('p', {}, 'Per mantenere il peso usiamo questa stima. Per perdere peso la riduciamo del 10%; per aumentarlo la alziamo del 5%. Sono scelte moderate di Pasti, non una promessa di risultato. I giorni di riposo mantengono lo stesso obiettivo.')),
+      h('p', {}, 'Per mantenere il peso usiamo questa stima. Per perdere peso sottraiamo il deficit in kcal scelto nel profilo: puoi indicare anche 0. I profili precedenti conservano il vecchio deficit del 10% finché non salvi una scelta esplicita. Per aumentare il peso applichiamo il 5% in più. Il consumo totale è una media che include gli allenamenti, senza calorie aggiunte per corsa o sala attrezzi.')),
     h('section', { class: 'panel method-panel' }, h('h2', {}, 'Proteine, carboidrati e grassi'),
       h('p', {}, 'Le proteine partono da 1,6 g per kg di peso al giorno, oppure 1,8 g/kg durante il deficit. Sono valori orientativi entro l’intervallo descritto dalla ', source('posizione ISSN su proteine ed esercizio', 'https://doi.org/10.1186/s12970-017-0177-8'), ' per adulti sani che si allenano.'),
       h('p', {}, 'Il 30% dell’energia viene assegnato ai grassi; ai carboidrati va ciò che resta. Le proteine sono limitate al 35% dell’energia per lasciare spazio agli altri nutrienti: se questo limite si applica, vedrai un avviso.'),
