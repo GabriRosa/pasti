@@ -224,13 +224,13 @@ test('failure of the second metric rejects the pair rather than returning a misl
   assert.equal(calls, 2);
 });
 
-test('identity verification uses only the fixed identity endpoint and resolves without exposing user identifiers', async () => {
+test('identity verification returns only the validated Health ID for private session comparison', async () => {
   const calls = [];
   const result = await verifyGoogleHealthAccount({ accessToken, fetchImpl: async (url, init) => {
     calls.push({ url, init });
     return response({ name: 'users/me/identity', healthUserId: 'synthetic-health-user', legacyUserId: 'legacy-test' });
   } });
-  assert.equal(result, undefined);
+  assert.deepEqual(result, { healthUserId: 'synthetic-health-user' });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, 'https://health.googleapis.com/v4/users/me/identity');
   assert.equal(calls[0].init.method, 'GET');

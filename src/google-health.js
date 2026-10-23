@@ -205,6 +205,7 @@ export async function verifyGoogleHealthAccount(options = {}) {
   if (typeof fetchImpl !== 'function') throw failure('UNAVAILABLE');
   const identity = await requestJson('https://health.googleapis.com/v4/users/me/identity', accessToken, undefined, fetchImpl);
   if (typeof identity.healthUserId !== 'string' || !/^[A-Za-z0-9-]{1,63}$/.test(identity.healthUserId)) throw failure('INVALID_RESPONSE');
+  return { healthUserId: identity.healthUserId };
 }
 
 export async function getGoogleHealthDay(options = {}) {

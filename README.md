@@ -14,6 +14,8 @@ Nella scheda **Attività svolta** scegli **Palestra**, **Corsa**, **Palestra + c
 
 La scheda **Google Health** può leggere le calorie bruciate nella data aperta, distinguendo il totale dalla quota attiva già inclusa. Richiede la configurazione del client Google e il consenso dell’utente. Il collegamento dura per la sessione: la pagina può aggiornarsi ogni cinque minuti mentre è visibile; dopo una ricarica o la scadenza dell’accesso serve ricollegarsi. La scheda indica l’ora della lettura e segnala dati assenti o parziali. Il consumo letto da Google non modifica automaticamente gli obiettivi o i pasti. Lo stato di configurazione e i passaggi necessari sono descritti nella [guida ai collegamenti](docs/integrations.md).
 
+Con il permesso facoltativo per l’invio dei pasti puoi caricare su Google Health le registrazioni che selezioni nell’anteprima del giorno. Pasti invia titolo, data, calorie, proteine, carboidrati e grassi dalla copia salvata quando hai segnato il pasto come mangiato. Aprire un giorno, collegare Google o importare un backup non avvia caricamenti. Un pasto già inviato non viene inviato nuovamente; un esito incerto richiede una verifica, senza ripetere automaticamente la scrittura.
+
 Il diario mostra obiettivo stimato, quantità pianificate e quantità consumate. Apri **Modifica porzioni e alternative** per cambiare un pasto o i grammi, poi **Segna mangiato** per registrarlo. La registrazione si può annullare. I giorni futuri si possono pianificare; la registrazione diventa disponibile dalla data scelta.
 
 Le alternative comprendono i carboidrati richiesti (pasta, riso, couscous, patate e pasta di lenticchie), pollo, uova, albumi, salmone, tonno e filetto di maiale. Le colazioni includono budino e mousse proteici, yogurt greco con cioccolato fuso e altre proposte.
@@ -34,7 +36,7 @@ In **Profilo** puoi esportare o importare un backup JSON e cancellare i dati loc
 
 GitHub ospita i file dell’app; il profilo e il diario restano nel browser. Non c’è sincronizzazione automatica tra dispositivi. Cancellare i dati del sito può rimuovere l’archivio, quindi conserva un backup. Il manifest consente l’aggiunta alla schermata Home nei browser compatibili; il caricamento richiede una connessione.
 
-I token e i risultati di Google Health rimangono esclusivamente nella memoria della sessione e non entrano nei backup. Le richieste vanno direttamente a Google; Pasti non dispone di un backend che conservi questi dati. Disconnetti chiude la sessione locale; la revoca del consenso si gestisce nelle connessioni dell’account Google. Vedi [come vengono usati i dati](privacy.html).
+I token e le calorie lette da Google Health rimangono nella memoria della sessione e non entrano nei backup. Le ricevute degli invii vengono invece conservate nel browser, separatamente dal diario: consentono di riconoscere un invio precedente anche dopo una ricarica. Non contengono token o valori nutrizionali e non entrano nei backup del diario. Le richieste vanno direttamente a Google; Pasti non dispone di un backend che conservi questi dati. Disconnetti chiude la sessione locale; la revoca del consenso si gestisce nelle connessioni dell’account Google. I pasti inviati rimangono su Google Health. Vedi [come vengono usati i dati](privacy.html).
 
 ## Calcoli
 

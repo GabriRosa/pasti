@@ -1,4 +1,4 @@
-import { validateTrainingPlan } from './training.js?v=20261023-google-health';
+import { validateTrainingPlan } from './training.js?v=20261023-google-health-sync';
 
 /** Estimates for healthy adults. See docs/nutrition.md for assumptions and sources. */
 export const ACTIVITY_LEVELS = Object.freeze([

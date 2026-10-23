@@ -1,9 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createGoogleHealthSession, GOOGLE_HEALTH_SCOPE, loadGoogleIdentityServices } from '../src/google-health-session.js';
+import { createGoogleHealthSession, GOOGLE_HEALTH_SCOPE, GOOGLE_HEALTH_NUTRITION_SCOPE, loadGoogleIdentityServices } from '../src/google-health-session.js';
+
+import { createGoogleHealthReceiptStore, googleHealthAccountKey } from '../src/google-health-receipts.js';
 
 const TOKEN = 'unit-test-token-never-in-state';
 const tick = () => new Promise(resolve => setImmediate(resolve));
+const waitFor = async check => { for (let i = 0; i < 200 && !check(); i++) await tick(); assert.ok(check(), 'Expected asynchronous state'); };
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
 const result = dateKey => ({ source: 'google_health', dateKey, timeZone: 'Europe/Rome', rangeStart: `${dateKey}T00:00:00Z`, rangeEnd: `${dateKey}T01:00:00Z`, fetchedAt: '2026-10-23T12:00:00Z', totalKcal: 0, activeKcal: null, coverage: { totalSeconds: 3600, activeSeconds: 0, requestedSeconds: 3600 } });
 
@@ -23,9 +26,10 @@ function harness(options = {}) {
     setTimer(callback, delay) { const id = ++nextId; timers.set(id, { callback, at: milliseconds + delay }); return id; },
     clearTimer(id) { timers.delete(id); },
     loadOAuth: async () => { loads++; return { initTokenClient(config) { configs.push(config); return { requestAccessToken(request) { requests.push(request); } }; } }; },
-    verifyAccount: async args => { identities.push(args); return options.verifyAccount?.(args); },
+    verifyAccount: async args => { identities.push(args); return options.verifyAccount ? options.verifyAccount(args) : { healthUserId: 'unit-user' }; },
     readDay: async args => { reads.push(args); return options.readDay ? options.readDay(args) : result(args.dateKey); },
     onChange: state => states.push(state),
+    ...options.sessionOptions,
   });
   const authorize = async (response = {}) => {
     session.connect();
@@ -99,7 +103,7 @@ test('late day responses cannot replace the selected day and disconnection clear
   const pending = [];
   const h = harness({ readDay: args => { const job = deferred(); pending.push({ ...job, dateKey: args.dateKey }); return job.promise; } });
   await h.session.prepare(); h.session.setContext({ dateKey: '2026-10-23', active: true, visible: true }); h.session.connect();
-  void h.configs[0].callback({ access_token: TOKEN, expires_in: 3600, scope: GOOGLE_HEALTH_SCOPE }); await tick();
+  void h.configs[0].callback({ access_token: TOKEN, expires_in: 3600, scope: GOOGLE_HEALTH_SCOPE }); await waitFor(() => pending.length === 1);
   h.session.setContext({ dateKey: '2026-10-22', active: true, visible: true }); await tick();
   pending[0].resolve(result('2026-10-23')); await tick(); assert.equal(h.session.getState().data, null);
   pending[1].resolve(result('2026-10-22')); await tick(); assert.equal(h.session.getState().data.dateKey, '2026-10-22');
@@ -136,7 +140,7 @@ test('a hidden page discards an in-flight response and resumes with a new read w
   const pending = [];
   const h = harness({ readDay: args => { const job = deferred(); pending.push({ ...job, dateKey: args.dateKey }); return job.promise; } });
   await h.session.prepare(); h.session.setContext({ dateKey: '2026-10-23', active: true, visible: true }); h.session.connect();
-  void h.configs[0].callback({ access_token: TOKEN, expires_in: 3600, scope: GOOGLE_HEALTH_SCOPE }); await tick();
+  void h.configs[0].callback({ access_token: TOKEN, expires_in: 3600, scope: GOOGLE_HEALTH_SCOPE }); await waitFor(() => pending.length === 1);
   h.session.setContext({ dateKey: '2026-10-23', active: true, visible: false });
   pending[0].resolve(result('2026-10-23')); await tick(); assert.equal(h.session.getState().data, null);
   h.session.setContext({ dateKey: '2026-10-23', active: true, visible: true }); await tick();
@@ -185,4 +189,121 @@ test('an unanswered OAuth popup times out and cannot complete with a late respon
   await old.callback({ access_token: TOKEN, expires_in: 3600, scope: GOOGLE_HEALTH_SCOPE });
   assert.equal(h.identities.length, 0); assert.equal(h.session.getState().data, null);
   assert.equal(h.session.connect(), true); h.session.dispose();
+});
+
+const WRITE_TOKEN = 'nutrition-token-never-in-state';
+const NUTRITION_SCOPES = `${GOOGLE_HEALTH_SCOPE} ${GOOGLE_HEALTH_NUTRITION_SCOPE}`;
+const preparedMeal = { mealKey: 'b'.repeat(64), fingerprint: 'c'.repeat(64), body: {} };
+const mealRequest = { dateKey: '2026-10-23', consumed: { consumedAt: '2026-10-23T10:00:00Z', meal: {} } };
+function memoryReceiptStore() {
+  const values = new Map();
+  const storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
+  const locks = { request: async (name, options, callback) => callback({ name }) };
+  return { store: createGoogleHealthReceiptStore({ storage, locks }), values, storage };
+}
+async function nutritionHarness(options = {}) {
+  const receipts = memoryReceiptStore();
+  const h = harness({ ...options, sessionOptions: { receiptStore: receipts.store, prepareMeal: async () => preparedMeal, ...options.sessionOptions } });
+  await h.session.prepare(); h.session.setContext({ dateKey: '2026-10-23', active: true, visible: true }); await h.authorize();
+  const permit = async (response = {}) => {
+    assert.equal(h.session.requestNutritionAccess(), true);
+    await h.configs.at(-1).callback({ access_token: WRITE_TOKEN, expires_in: 3600, scope: NUTRITION_SCOPES, ...response });
+  };
+  return { ...h, ...receipts, permit };
+}
+
+test('nutrition consent is explicit, requests both minimal scopes and preserves calorie reading when denied', async () => {
+  const h = await nutritionHarness();
+  assert.equal(h.configs.length, 1); assert.equal(h.session.getState().nutrition.status, 'disabled');
+  const original = h.session.getState().data;
+  await h.permit({ error: 'access_denied' });
+  assert.equal(h.configs[1].scope, NUTRITION_SCOPES); assert.equal(h.configs[1].include_granted_scopes, false);
+  assert.deepEqual(h.requests[1], { prompt: 'consent' });
+  assert.equal(h.session.getState().status, 'connected'); assert.deepEqual(h.session.getState().data, original);
+  assert.equal(h.session.getState().nutrition.status, 'disabled');
+  await h.session.refresh(); assert.equal(h.reads.at(-1).accessToken, TOKEN);
+  h.session.dispose();
+});
+
+test('nutrition missing, excess or malformed permissions cannot replace the read token', async () => {
+  for (const response of [{ scope: GOOGLE_HEALTH_NUTRITION_SCOPE }, { scope: `${NUTRITION_SCOPES} openid` }, { expires_in: Infinity }, { expires_in: true }, { access_token: 'bad token' }]) {
+    const h = await nutritionHarness(); await h.permit(response);
+    assert.equal(h.session.getState().nutrition.status, 'disabled'); assert.equal(h.identities.length, 1);
+    await h.session.refresh(); assert.equal(h.reads.at(-1).accessToken, TOKEN); h.session.dispose();
+  }
+});
+
+test('a different Health account cannot replace the read token or enable uploads', async () => {
+  const h = await nutritionHarness({ verifyAccount: async ({ accessToken }) => ({ healthUserId: accessToken === TOKEN ? 'unit-user' : 'other-user' }) });
+  await h.permit();
+  assert.equal(h.session.getState().nutrition.error.code, 'ACCOUNT_CHANGED');
+  await h.session.refresh(); assert.equal(h.reads.at(-1).accessToken, TOKEN);
+  const result = await h.session.syncNutrition(mealRequest); assert.equal(result.error.code, 'AUTH_REQUIRED');
+  h.session.dispose();
+});
+
+test('a verified same-account grant enables manual sync and keeps tokens and identity out of snapshots', async () => {
+  const calls = [];
+  const h = await nutritionHarness({ sessionOptions: { syncMeal: async args => { calls.push(args); return { status: 'not_found', receipt: null }; } } });
+  await h.permit(); assert.equal(h.session.getState().nutrition.status, 'ready');
+  await h.session.refresh(); assert.equal(h.reads.at(-1).accessToken, WRITE_TOKEN);
+  assert.equal(calls.length, 0);
+  assert.equal((await h.session.syncNutrition(mealRequest)).status, 'not_found');
+  assert.equal(calls[0].allowCreate, false); assert.equal(calls[0].accessToken, WRITE_TOKEN);
+  const publicState = JSON.stringify(h.states);
+  for (const value of [TOKEN, WRITE_TOKEN, 'unit-user']) assert.equal(publicState.includes(value), false);
+  await h.advance(3600001); assert.equal(h.session.getState().status, 'expired');
+  assert.notEqual(h.session.getState().nutrition.status, 'ready'); h.session.dispose();
+});
+
+test('a timed out nutrition popup cannot enable uploads later and leaves read access intact', async () => {
+  const h = await nutritionHarness(); h.session.requestNutritionAccess(); const config = h.configs.at(-1);
+  await h.advance(300001); assert.equal(h.session.getState().nutrition.error.code, 'AUTH_TIMEOUT');
+  await config.callback({ access_token: WRITE_TOKEN, expires_in: 3600, scope: NUTRITION_SCOPES });
+  assert.equal(h.identities.length, 1); assert.equal(h.session.getState().nutrition.status, 'disabled');
+  await h.session.refresh(); assert.equal(h.reads.at(-1).accessToken, TOKEN); h.session.dispose();
+});
+
+test('pending receipts survive sessions, forbid create and expose changed fingerprints', async () => {
+  let received;
+  const h = await nutritionHarness({ sessionOptions: { syncMeal: async args => { received = args; return { status: 'pending', receipt: args.receipt }; } } });
+  const accountKey = await googleHealthAccountKey('public-client.apps.googleusercontent.com', 'unit-user');
+  const receipt = { version: 1, accountKey, ...preparedMeal, status: 'pending', attemptedAt: '2026-10-23T10:00:00Z' }; delete receipt.body;
+  await h.store.compareAndSet(receipt, null); await h.permit();
+  assert.equal((await h.session.syncNutrition({ ...mealRequest, allowCreate: true })).status, 'pending');
+  assert.equal(received.allowCreate, false); assert.deepEqual(received.receipt, receipt);
+  assert.equal(h.session.nutritionMealState({ ...preparedMeal, fingerprint: 'd'.repeat(64) }).status, 'changed');
+  h.session.disconnect(); assert.deepEqual(h.store.read(accountKey, preparedMeal.mealKey), receipt); h.session.dispose();
+});
+
+test('receipt write failure throws before an upload can begin', async () => {
+  let posted = false;
+  const accountKey = await googleHealthAccountKey('public-client.apps.googleusercontent.com', 'unit-user');
+  const h = await nutritionHarness({ sessionOptions: { syncMeal: async args => {
+    await args.recordReceipt({ version: 1, accountKey, mealKey: preparedMeal.mealKey, fingerprint: preparedMeal.fingerprint, status: 'pending', attemptedAt: '2026-10-23T10:00:00Z' }, null);
+    posted = true; return { status: 'uploaded' };
+  } } });
+  await h.permit(); h.storage.setItem = () => { throw new Error('quota and private detail'); };
+  const result = await h.session.syncNutrition({ ...mealRequest, allowCreate: true });
+  assert.equal(posted, false); assert.equal(result.error.code, 'RECEIPTS_UNAVAILABLE'); assert.equal(h.values.size, 0); h.session.dispose();
+});
+
+test('changing the selected day while checking stops the pending receipt and upload', async () => {
+  const gate = deferred(); let checking = false, posted = false;
+  const accountKey = await googleHealthAccountKey('public-client.apps.googleusercontent.com', 'unit-user');
+  const h = await nutritionHarness({ sessionOptions: { syncMeal: async args => {
+    checking = true; await gate.promise;
+    await args.recordReceipt({ version: 1, accountKey, mealKey: preparedMeal.mealKey, fingerprint: preparedMeal.fingerprint, status: 'pending', attemptedAt: '2026-10-23T10:00:00Z' }, null);
+    posted = true; return { status: 'uploaded' };
+  } } });
+  await h.permit(); const pending = h.session.syncNutrition({ ...mealRequest, allowCreate: true }); await waitFor(() => checking);
+  h.session.setContext({ dateKey: '2026-10-22', active: true, visible: true }); gate.resolve();
+  assert.equal((await pending).error.code, 'SESSION_CHANGED'); assert.equal(posted, false); assert.equal(h.values.size, 0); h.session.dispose();
+});
+
+test('unsupported browser locking disables write consent but retains calorie reading', async () => {
+  const h = await nutritionHarness({ sessionOptions: { receiptStore: createGoogleHealthReceiptStore({ storage: {}, locks: null }) } });
+  assert.equal(h.session.requestNutritionAccess(), false); assert.equal(h.configs.length, 1);
+  assert.equal(h.session.getState().nutrition.error.code, 'LOCKS_UNAVAILABLE');
+  assert.equal(h.session.getState().status, 'connected'); h.session.dispose();
 });

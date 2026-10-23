@@ -26,9 +26,25 @@ L’identificativo pubblico del client OAuth viene letto da [google-health-confi
 
 La configurazione Google richiede un progetto con Google Health API abilitata, un’app OAuth e un client Web con origine JavaScript autorizzata `https://gabrirosa.github.io`, senza il percorso `/pasti/`. Per le prove locali occorre autorizzare separatamente l’origine e la porta usate. Gli utenti di prova devono essere aggiunti alla configurazione Google. L’abilitazione comporta l’accettazione dei termini Google; il consenso alla lettura dei dati resta un passaggio distinto dell’utente.
 
-Il codice del collegamento è disponibile; **il client non è ancora configurato e nessun account Google Health è stato collegato o verificato con dati reali**. I test usano risposte sintetiche. Non è stato attivato un servizio che aggiorni i dati a pagina chiusa.
+Il client Web è configurato per il sito pubblico e l’app Google è in modalità di prova personale. Google Health API è abilitata; il consenso dell’account si completa dal sito. I test usano risposte sintetiche e la presenza dei dati personali deve essere verificata con una lettura reale. Non è stato attivato un servizio che aggiorni i dati a pagina chiusa.
 
 Fonti ufficiali: [calorie Google Health](https://developers.google.com/health/data-types/calories), [aggregazioni rollUp](https://developers.google.com/health/reference/rest/v4/users.dataTypes.dataPoints/rollUp), [identità del profilo](https://developers.google.com/health/reference/rest/v4/users/getIdentity), [accesso dal browser](https://developers.google.com/identity/oauth2/web/guides/use-token-model) e [configurazione Google](https://developers.google.com/health/setup). Verificate il 23 ottobre 2026.
+
+## Invio dei pasti a Google Health
+
+Il permesso aggiuntivo `googlehealth.nutrition.writeonly` consente di aggiungere dati alimentari e leggere le sole voci create da questo client. Pasti lo richiede quando abiliti l’invio; negarlo lascia disponibile la connessione per leggere le calorie. I due accessi vengono associati alla stessa identità Google Health, verificata in memoria.
+
+L’anteprima del giorno elenca soltanto gli snapshot in `day.consumed`. Selezioni i pasti e confermi l’invio. Il connettore [google-health-nutrition.js](../src/google-health-nutrition.js) crea un `nutrition-log` per pasto con titolo, categoria, data, energia, proteine, carboidrati e grassi. Le quantità derivano dalla registrazione salvata, anche se il catalogo degli alimenti cambia in seguito. I pasti pianificati e gli spuntini saltati restano esclusi. L’accesso Google, la navigazione fra giorni e il ripristino di un backup non inviano pasti.
+
+Per una registrazione effettuata nella data del diario viene usata l’ora della registrazione. Per un pasto segnato retroattivamente viene usata l’ora salvata nel piano di quel giorno: è un riferimento convenzionale, non un’ora di consumo osservata. L’intervallo API dura un secondo convenzionale e non rappresenta la durata del pasto. Orari futuri o ambigui non vengono inviati senza una correzione esplicita.
+
+Prima di creare una voce, Pasti cerca fra le registrazioni del proprio client con `self-sources`. Salva inoltre una ricevuta locale pendente prima della richiesta e la aggiorna dopo una conferma valida. La ricevuta contiene un hash dell’account e del client, la chiave del pasto, l’impronta del contenuto e l’eventuale identificativo del record. Non contiene il token, l’identificativo originale dell’account o i valori del pasto. È separata dal diario e dal suo backup. Un blocco tra schede impedisce invii simultanei dallo stesso browser.
+
+Se la risposta va persa, la ricevuta resta pendente: una nuova verifica legge Google senza ripetere il POST. Google non supporta attualmente gli identificativi assegnati dal client nelle creazioni, quindi questo recupero non costituisce una garanzia di invio unico lato server. Cancellare le ricevute o usare un altro browser può rendere irriconoscibile un vecchio invio il cui contenuto è cambiato.
+
+Le voci alimentari create con un nome e valori propri, chiamate `anonymous food` dall’API, non si possono modificare dopo la creazione. Se cambi o annulli localmente un pasto già caricato, Pasti segnala la differenza; la voce su Google rimane presente. Il connettore non invia PATCH o cancellazioni e non modifica i pasti creati da altre app.
+
+Fonti ufficiali verificate il 23 ottobre 2026: [dati alimentari](https://developers.google.com/health/data-types/nutrition), [permessi](https://developers.google.com/health/scopes), [gestione dei dati e degli identificativi](https://developers.google.com/health/data-management), [filtri delle sorgenti](https://developers.google.com/health/filters), [creazione dei record](https://developers.google.com/health/reference/rest/v4/users.dataTypes.dataPoints/create).
 
 ## Importazione gratuita da un file
 

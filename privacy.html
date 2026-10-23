@@ -22,10 +22,10 @@
       <a href="./#today">← Torna a Pasti</a>
       <h1>Come vengono usati i dati</h1>
       <p class="date">Aggiornato il 23 ottobre 2026</p>
-      <p>Pasti è un diario alimentare personale. Il profilo e i pasti sono conservati nel browser; il collegamento facoltativo a Google Health serve a leggere il consumo energetico della data aperta.</p>
+      <p>Pasti è un diario alimentare personale. Il profilo e il diario sono conservati nel browser. Il collegamento facoltativo a Google Health permette di leggere il consumo energetico e, con un permesso aggiuntivo, inviare i pasti che scegli.</p>
 
       <h2>Profilo, pasti e backup</h2>
-      <p>Età, peso, altezza, impostazioni, pasti, attività registrate ed etichette personalizzate restano nella memoria locale del browser. Il codice di Pasti non li invia a Google, a GitHub o a un server dell’applicazione.</p>
+      <p>Età, peso, altezza, impostazioni, attività registrate ed etichette personalizzate restano nella memoria locale del browser. Il diario alimentare resta locale; soltanto i pasti selezionati nell’anteprima di invio vengono trasmessi a Google dopo la tua conferma. Il codice non invia il diario a GitHub o a un server dell’applicazione.</p>
       <p>In Profilo puoi scaricare un backup e cancellare i dati locali. Il backup contiene i dati del diario: conservalo dove desideri mantenerli privati. La cancellazione del sito dal browser può rimuovere il diario; un backup già scaricato va eliminato separatamente.</p>
 
       <h2>Collegamento facoltativo a Google Health</h2>
@@ -33,8 +33,13 @@
       <p>Le richieste partono direttamente dal browser verso Google. Pasti non dispone di un server che riceva o conservi questi dati. L’identificativo del profilo serve a verificare il collegamento e non viene salvato nel diario.</p>
       <p>Il token di accesso e i risultati delle letture rimangono in memoria durante la sessione. Non vengono salvati nel browser, nel backup o nel repository. Ricaricare o chiudere la pagina termina la sessione; alla scadenza dell’accesso è necessario ricollegarsi. Il sito aggiorna i dati soltanto durante la sessione aperta.</p>
 
+      <h2>Invio facoltativo dei pasti</h2>
+      <p>Puoi abilitare separatamente il permesso Google per aggiungere dati sull’alimentazione. Pasti invia il titolo, la data, la categoria del pasto, le calorie e i grammi di proteine, carboidrati e grassi delle registrazioni che selezioni. L’anteprima precede ogni invio. Collegare l’account o importare un backup non carica automaticamente il diario.</p>
+      <p>Il permesso Google comprende l’aggiunta, la modifica e la cancellazione dei dati alimentari creati dall’app. Pasti usa soltanto creazione e lettura delle proprie voci per controllare l’esito degli invii. Non modifica né cancella voci su Google. Un pasto annullato nel diario locale può quindi essere ancora presente su Google Health.</p>
+      <p>Per riconoscere gli invii precedenti, Pasti conserva nel browser ricevute separate dal diario. Contengono un hash dell’account e del client, una chiave del pasto, un’impronta del contenuto, lo stato, l’ora del tentativo e l’eventuale identificativo del record Google. Non contengono token, valori nutrizionali o l’identificativo originale dell’account. Non sono incluse nel backup del diario; la cancellazione dei dati del sito dal browser rimuove anche queste ricevute.</p>
+
       <h2>Disconnettere e revocare</h2>
-      <p>Disconnetti elimina dalla sessione di Pasti il token e i risultati letti. Per revocare anche il permesso concesso a Google, apri le <a href="https://myaccount.google.com/connections" target="_blank" rel="noopener noreferrer">connessioni del tuo account Google</a> e rimuovi Pasti. I dati originali su Google Health restano nel tuo account.</p>
+      <p>Disconnetti elimina dalla sessione di Pasti i token e i risultati letti. Per revocare anche i permessi concessi a Google, apri le <a href="https://myaccount.google.com/connections" target="_blank" rel="noopener noreferrer">connessioni del tuo account Google</a> e rimuovi Pasti. Le ricevute locali e i pasti già inviati a Google Health restano presenti. Puoi gestire le voci alimentari direttamente in Google Health.</p>
 
       <h2>Servizi esterni</h2>
       <p>GitHub Pages distribuisce i file pubblici del sito. Se il collegamento Google è configurato, Pasti carica la libreria ufficiale Google Identity Services per l’accesso. L’uso di questi servizi comporta normali richieste di rete dal browser ed è soggetto alle rispettive informative: <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement" target="_blank" rel="noopener noreferrer">GitHub</a> e <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">Google</a>.</p>

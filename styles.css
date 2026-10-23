@@ -98,6 +98,15 @@ main:focus { outline: none; }
 .health-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 9px 15px; margin: 17px 0; }
 .health-error { padding: 13px 15px; border-radius: 10px; font-size: .78rem; color: var(--danger); background: #fcf0eb; }
 .health-footnote { margin-top: 10px; }
+.nutrition-controls { border-top: 1px solid var(--line); margin-top: 20px; padding-top: 18px; }
+.nutrition-controls h3 { font-size: 1.03rem; }
+.nutrition-controls > p { font-size: .77rem; color: var(--ink-soft); }
+.nutrition-meal-list { display: flex; flex-direction: column; gap: 14px; margin: 20px 0; }
+.nutrition-meal-row { padding: 17px; border: 1px solid var(--line); border-radius: 12px; }
+.nutrition-meal-title { display: flex; align-items: center; gap: 10px; font-size: .9rem; font-weight: 600; }
+.nutrition-row-state { margin-top: 12px; font-size: .78rem; }
+.nutrition-row-state > strong { font-weight: 600; }
+.nutrition-review .dialog-actions { flex-wrap: wrap; }
 .csv-sync-info { background: #eef1e3; padding: 15px 17px; border-radius: 12px; margin-bottom: 22px; font-size: .76rem; }
 .csv-sync-info p { color: var(--ink-soft); margin: 7px 0 9px; }
 .csv-mapping { padding-top: 16px; }

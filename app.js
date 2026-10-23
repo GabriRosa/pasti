@@ -1,11 +1,12 @@
-import { ACTIVITY_LEVELS, calculateTargets, sumMacros } from './src/nutrition.js?v=20261023-google-health';
-import { FOODS, LIDL_FOOD_IDS, getFood } from './src/foods.js?v=20261023-google-health';
-import { createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } from './src/planner.js?v=20261023-google-health';
-import { trainingForDate, validateTrainingPlan, TRAINING_LOG_TYPES, validateTrainingLog, trainingLogLabel } from './src/training.js?v=20261023-google-health';
-import { parseActivityCsv, suggestActivityColumns, summarizeActivityCsv } from './src/activity-import.js?v=20261023-google-health';
-import { STORAGE_KEY, MAX_BACKUP_BYTES, createEmptyData, validateData, parseBackup, loadData, saveData, exportBackup, clearData } from './src/storage.js?v=20261023-google-health';
-import { GOOGLE_HEALTH_CLIENT_ID } from './src/google-health-config.js?v=20261023-google-health';
-import { createGoogleHealthSession } from './src/google-health-session.js?v=20261023-google-health';
+import { ACTIVITY_LEVELS, calculateTargets, sumMacros } from './src/nutrition.js?v=20261023-google-health-sync';
+import { FOODS, LIDL_FOOD_IDS, getFood } from './src/foods.js?v=20261023-google-health-sync';
+import { createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } from './src/planner.js?v=20261023-google-health-sync';
+import { trainingForDate, validateTrainingPlan, TRAINING_LOG_TYPES, validateTrainingLog, trainingLogLabel } from './src/training.js?v=20261023-google-health-sync';
+import { parseActivityCsv, suggestActivityColumns, summarizeActivityCsv } from './src/activity-import.js?v=20261023-google-health-sync';
+import { STORAGE_KEY, MAX_BACKUP_BYTES, createEmptyData, validateData, parseBackup, loadData, saveData, exportBackup, clearData } from './src/storage.js?v=20261023-google-health-sync';
+import { GOOGLE_HEALTH_CLIENT_ID } from './src/google-health-config.js?v=20261023-google-health-sync';
+import { createGoogleHealthSession } from './src/google-health-session.js?v=20261023-google-health-sync';
+import { prepareGoogleHealthConsumedMeal } from './src/google-health-nutrition.js?v=20261023-google-health-sync';
 
 const $ = selector => document.querySelector(selector);
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -229,7 +230,7 @@ function renderGoogleHealth() {
   return h('section', { class: 'panel google-health-panel', 'aria-labelledby': 'google-health-title' },
     h('div', { class: 'health-heading' }, h('div', {}, h('p', { class: 'eyebrow' }, 'CALORIE BRUCIATE'), h('h2', { id: 'google-health-title', tabindex: '-1' }, 'Google Health'), h('p', { class: 'helper' }, 'Fonti aggregate · dati separati dal piano alimentare')), h('span', { class: 'health-status', role: 'status' }, status)),
     state.status === 'unconfigured' ? h('p', { class: 'health-explainer' }, 'Il collegamento è in configurazione. Nessun account Google Health è collegato e nessun dato salute viene letto.') :
-      h('p', { class: 'health-explainer' }, 'Il collegamento vale per questa sessione aperta e può richiedere una nuova autorizzazione dopo una scadenza o un ricaricamento. Pasti legge direttamente da Google e non invia il tuo diario, il profilo o i pasti.'),
+      h('p', { class: 'health-explainer' }, 'Il collegamento vale per questa sessione aperta e può richiedere una nuova autorizzazione dopo una scadenza o un ricaricamento. La lettura non invia il diario o il profilo. L’invio dei pasti è separato, facoltativo e richiede conferma.'),
     future && h('p', { class: 'notice compact' }, 'Le calorie di un giorno futuro non vengono richieste.'),
     state.error && h('p', { class: 'health-error', role: 'alert' }, state.error.message),
     state.stale && result && h('p', { class: 'notice compact' }, 'Sono mostrati i dati dell’ultima lettura riuscita. L’aggiornamento automatico è sospeso fino a un nuovo tentativo manuale.'),
@@ -240,9 +241,126 @@ function renderGoogleHealth() {
       h('p', { class: 'health-timestamps' }, `Intervallo ${dateTime(result.rangeStart)} – ${dateTime(result.rangeEnd)} · Europe/Rome. Ultima lettura: ${dateTime(result.fetchedAt)}.`)) :
       state.status === 'connected' && !future && h('p', { class: 'health-explainer' }, state.busy ? 'Lettura delle calorie per la data selezionata…' : 'Nessuna lettura disponibile per questa data.'),
     controls,
+    state.status === 'connected' && renderNutritionControls(state),
     h('p', { class: 'helper health-footnote' }, h('a', { id: 'health-privacy', href: './privacy.html', target: '_blank', rel: 'noopener noreferrer' }, 'Come vengono usati i dati')),
     h('p', { class: 'helper health-footnote' }, 'Le calorie attive sono già comprese nel totale: non vengono sommate al TDEE e non modificano il deficit o i pasti. L’ora di lettura non indica l’ultima sincronizzazione del dispositivo.'),
     state.status !== 'unconfigured' && h('p', { class: 'helper health-footnote' }, 'Per oggi, la lettura si aggiorna ogni 5 minuti con pagina visibile e sessione valida. Nessun aggiornamento a pagina chiusa. Scollegare la sessione cancella i dati in memoria; per revocare il consenso usa ', h('a', { id: 'health-permissions', href: 'https://myaccount.google.com/connections', target: '_blank', rel: 'noopener noreferrer' }, 'le connessioni del tuo account Google'), '.'));
+}
+
+function renderNutritionControls(state) {
+  const access = state.nutrition;
+  const count = Object.keys(data.days[selectedDate]?.consumed ?? {}).length;
+  const future = selectedDate > localDate();
+  const diaryUnavailable = Boolean(storageReadError || storageConflict || unsaved);
+  return h('section', { class: 'nutrition-controls' }, h('h3', {}, 'Invia i pasti a Google Health'),
+    h('p', {}, 'Solo i pasti segnati come mangiati, dopo la tua conferma. Nessun invio automatico, anche per i giorni passati.'),
+    !access.locksAvailable ? h('p', { class: 'health-error' }, 'Il browser non offre il blocco tra schede necessario. L’invio è disabilitato; la lettura delle calorie resta disponibile.') :
+      access.status === 'ready' ? button('Rivedi pasti da inviare', openNutritionReview, 'button secondary small', { id: 'nutrition-review', disabled: future || !count || access.busy || diaryUnavailable }) :
+        button(access.busy ? 'Autorizzazione invio in corso…' : access.status === 'expired' ? 'Riabilita invio pasti' : 'Abilita invio pasti', () => healthSession.requestNutritionAccess(), 'button secondary small', { id: 'nutrition-permission', disabled: future || access.busy }),
+    access.error && h('p', { class: 'health-error', role: 'alert' }, access.error.code === 'AUTH_REQUIRED' ? 'Il permesso di invio è scaduto. Puoi riabilitarlo; la lettura delle calorie resta disponibile.' : access.error.message),
+    diaryUnavailable && h('p', { class: 'health-error' }, 'L’invio è sospeso finché il diario ha modifiche non salvate o un conflitto tra schede.'),
+    !count && h('p', { class: 'helper' }, 'In questo giorno non hai ancora segnato pasti come mangiati.'),
+    future && h('p', { class: 'helper' }, 'I pasti di una data futura non possono essere inviati.'),
+    h('p', { class: 'helper' }, 'Pasti ricorda gli invii su questo dispositivo per evitare doppioni. Se correggi un pasto già inviato, la voce su Google resta presente.'));
+}
+
+async function openNutritionReview() {
+  const dateKey = selectedDate;
+  if (dateKey > localDate() || storageReadError || storageConflict || unsaved || healthSession.getState().nutrition.status !== 'ready') return;
+  const saved = data.days[dateKey]?.consumed;
+  if (!saved || !Object.keys(saved).length) return;
+  const labels = { unverified: 'Stato da verificare', checking: 'Verifica in corso', sending: 'Invio in corso', not_found: 'Non inviato', sent: 'Inviato', pending: 'Esito incerto · verifica prima di continuare', changed: 'Dati cambiati · voce Google conservata', conflict: 'Più voci corrispondenti su Google', rejected: 'Invio rifiutato', unavailable: 'Verifica non disponibile' };
+  let closed = false;
+  let working = true;
+  const container = h('div', { class: 'dialog-content nutrition-review', id: 'nutrition-review-dialog' });
+  const list = h('div', { class: 'nutrition-meal-list' });
+  const message = h('p', { class: 'helper', role: 'status' }, 'Verifica dei pasti già inviati da Pasti…');
+  const rows = Object.entries(saved).map(([id, consumed]) => ({ id, consumed: clone(consumed), signature: JSON.stringify(consumed), status: 'unverified', prepared: null }));
+  const current = row => !closed && selectedDate === dateKey && document.visibilityState !== 'hidden' && !storageReadError && !storageConflict && !unsaved && JSON.stringify(data.days[dateKey]?.consumed[row.id]) === row.signature;
+  const eligible = row => ['not_found', 'rejected'].includes(row.status);
+  const send = button('Seleziona i pasti da inviare', async () => {
+    if (working) return;
+    const selected = rows.filter(row => row.checkbox.checked && eligible(row));
+    if (!selected.length) return;
+    working = true; updateControls(); message.textContent = 'Invio dei pasti selezionati…';
+    for (const row of selected) {
+      if (!current(row)) { message.textContent = 'Invio fermato: data, pasto o sessione sono cambiati. Riapri la verifica.'; break; }
+      row.status = 'sending'; renderRowState(row);
+      const outcome = await healthSession.syncNutrition({ dateKey, consumed: row.consumed, occurredAt: row.occurredAt || undefined, allowCreate: true, isCurrent: () => current(row) });
+      if (closed) return;
+      row.status = outcome.status; row.error = outcome.error; row.checkbox.checked = false; renderRowState(row);
+      if (outcome.error || ['pending', 'changed', 'conflict', 'unavailable'].includes(outcome.status)) { message.textContent = 'Invio sospeso. Controlla l’esito prima di continuare: non sono stati ripetuti tentativi incerti.'; break; }
+    }
+    working = false; updateControls();
+    if (!closed && !message.textContent.startsWith('Invio fermato') && !message.textContent.startsWith('Invio sospeso')) message.textContent = 'Operazione conclusa. Le ricevute sono conservate separatamente dal diario.';
+  }, 'button primary', { disabled: true });
+  function updateControls() {
+    const count = rows.filter(row => row.checkbox.checked && eligible(row)).length;
+    send.disabled = working || count === 0;
+    send.textContent = count ? `Invia ${count} ${count === 1 ? 'pasto selezionato' : 'pasti selezionati'}` : 'Seleziona i pasti da inviare';
+    for (const row of rows) { row.checkbox.disabled = working || !eligible(row); if (row.checkButton) row.checkButton.disabled = working || (!row.prepared && !row.occurredAt); }
+  }
+  function renderRowState(row) {
+    row.stateNode.replaceChildren(...[h('strong', {}, labels[row.status] ?? 'Stato da verificare'), row.error && h('p', { class: 'form-error' }, row.error.code === 'UNAVAILABLE' ? 'Google non ha confermato l’esito. Usa Verifica stato su Google prima di tentare un invio.' : row.error.message),
+      ['pending', 'changed', 'conflict'].includes(row.status) && h('p', { class: 'helper' }, 'La voce precedente può essere ancora presente su Google Health. Gestiscila direttamente in Google Health; Pasti non la cancella né la sostituisce.')].filter(Boolean));
+  }
+  async function check(row) {
+    if (!current(row)) { row.status = 'unavailable'; row.error = { message: 'Il pasto o la data sono cambiati. Riapri la verifica.' }; renderRowState(row); return; }
+    row.status = 'checking'; row.error = null; renderRowState(row);
+    try {
+      row.prepared = await prepareGoogleHealthConsumedMeal({ dateKey, consumed: row.consumed, occurredAt: row.occurredAt || undefined });
+      if (!current(row)) return;
+      const interval = row.prepared.body?.nutritionLog?.interval;
+      if (interval?.endTime) row.timeNode.textContent = `Orario per Google: ${new Date(interval.endTime).toLocaleString('it-IT', { timeZone: 'Europe/Rome' })}. Per i pasti registrati in un altro giorno usiamo l’orario indicato nel diario.`;
+      const known = healthSession.nutritionMealState(row.prepared);
+      if (known.status === 'changed') { row.status = 'changed'; renderRowState(row); return; }
+      const outcome = await healthSession.syncNutrition({ dateKey, consumed: row.consumed, occurredAt: row.occurredAt || undefined, allowCreate: false, isCurrent: () => current(row) });
+      if (closed) return;
+      row.status = outcome.status; row.error = outcome.error;
+    } catch (error) {
+      row.status = 'unavailable';
+      row.error = { message: error?.code === 'TIME_REQUIRED' ? 'L’orario salvato è ambiguo o inesistente. Indica un istante ISO con fuso, poi verifica.' : 'Il pasto non può essere preparato per l’invio. Controlla i dati del consumo.' };
+      row.timeField.hidden = error?.code !== 'TIME_REQUIRED' && row.occurredAt === undefined;
+    }
+    renderRowState(row);
+  }
+  for (const row of rows) {
+    row.checkbox = h('input', { type: 'checkbox', disabled: true, onchange: updateControls, 'aria-label': `Invia ${row.consumed.meal.title}` });
+    row.stateNode = h('div', { class: 'nutrition-row-state', 'aria-live': 'polite' });
+    row.timeNode = h('p', { class: 'helper' });
+    const timeInput = h('input', { type: 'text', placeholder: 'AAAA-MM-GGTHH:mm:ss+02:00', 'aria-label': 'Istante del consumo con fuso', oninput: event => { row.occurredAt = event.target.value; row.prepared = null; row.status = 'unverified'; row.checkbox.checked = false; updateControls(); renderRowState(row); } });
+    row.timeField = field('Istante del consumo con fuso (ISO)', timeInput, 'Non modifica l’orario nel diario. Serve solo a risolvere un’ora ambigua o inesistente.');
+    row.timeField.hidden = true;
+    row.checkButton = button('Verifica stato su Google', async () => {
+      if (working) return;
+      working = true; updateControls(); await check(row); working = false; updateControls();
+      if (!closed) message.textContent = rows.every(item => item.status === 'sent') ? 'I pasti elencati risultano inviati a Google.' : 'Controlla lo stato di ciascun pasto prima di continuare.';
+    }, 'text-button');
+    const macros = row.consumed.meal.macros;
+    list.append(h('article', { class: 'nutrition-meal-row' }, h('label', { class: 'nutrition-meal-title' }, row.checkbox, h('span', {}, row.consumed.meal.title)),
+      h('p', { class: 'helper' }, `${dateKey} · ${round(macros.kcal)} kcal · P ${round(macros.protein)} g · C ${round(macros.carbs)} g · G ${round(macros.fat)} g`), row.timeNode, row.stateNode, row.timeField, row.checkButton));
+    renderRowState(row);
+  }
+  container.append(dialogHeading('Pasti da inviare a Google Health', `Giorno ${dateKey}. Solo consumi già registrati, nessun invio automatico.`),
+    h('p', { class: 'helper' }, 'Prima controlliamo le voci già inviate da Pasti. Un esito incerto consente soltanto una nuova verifica, non un nuovo invio. Una selezione e il pulsante finale confermano l’invio.'), list, message,
+    h('div', { class: 'dialog-actions' }, button('Chiudi senza altri invii', closeDialog), send));
+  showDialog(container); $('#app-dialog').addEventListener('close', () => { closed = true; }, { once: true });
+  updateControls();
+  for (const row of rows) { if (closed) return; await check(row); }
+  if (!closed) { working = false; message.textContent = 'Seleziona soltanto i pasti non inviati che vuoi caricare.'; updateControls(); }
+}
+
+async function undoConsumedMeal(meal) {
+  const dateKey = selectedDate;
+  const original = data.days[dateKey]?.consumed[meal.id];
+  if (!original) return;
+  const remove = () => updateDay(day => { delete day.consumed[meal.id]; });
+  try { if (!healthSession.hasAnyNutritionReceipts()) { remove(); return; } } catch { /* Fall back to the conservative receipt check. */ }
+  let hasRemoteReceipt = true;
+  try { hasRemoteReceipt = await healthSession.hasNutritionReceipt({ dateKey, mealId: meal.id }); } catch { /* Keep the warning when receipt storage is unreadable. */ }
+  if (selectedDate !== dateKey || JSON.stringify(data.days[dateKey]?.consumed[meal.id]) !== JSON.stringify(original)) return;
+  if (hasRemoteReceipt) confirmAction('Annullare solo nel diario?', 'Una voce inviata o con esito incerto può restare su Google Health. L’annullamento locale non la cancella; eventuali correzioni vanno gestite direttamente su Google Health.', 'Annulla nel diario', remove);
+  else remove();
 }
 
 function openActivityCsvImport() {
@@ -432,7 +550,7 @@ function renderMeal(meal, day, index) {
       h('div', { class: 'meal-actions' },
         !eaten && !skipped && button('Modifica porzioni e alternative', () => { try { editMeal(meal); } catch (error) { notify(error.message, true); } }, 'text-button'),
         meal.slot === 'preworkout' && !eaten && button(skipped ? 'Aggiungi al piano' : 'Salta spuntino', () => updateDay(target => { target.skipped = skipped ? target.skipped.filter(id => id !== meal.id) : [...target.skipped, meal.id]; }), 'text-button muted'),
-        eaten ? button('Annulla registrazione', () => updateDay(target => { delete target.consumed[meal.id]; }), 'button secondary small') : !skipped && button('Segna mangiato', () => updateDay(target => { target.consumed[meal.id] = { consumedAt: new Date().toISOString(), meal: clone(meal) }; }), 'button primary small', { disabled: future, title: future ? 'Potrai registrare il pasto quando arriva questa data.' : 'Registra questo pasto nel diario' })),
+        eaten ? button('Annulla registrazione', () => { void undoConsumedMeal(meal); }, 'button secondary small') : !skipped && button('Segna mangiato', () => updateDay(target => { target.consumed[meal.id] = { consumedAt: new Date().toISOString(), meal: clone(meal) }; }), 'button primary small', { disabled: future, title: future ? 'Potrai registrare il pasto quando arriva questa data.' : 'Registra questo pasto nel diario' })),
       future && !eaten && !skipped && h('p', { class: 'meal-note future-note' }, 'Stai pianificando un giorno futuro. La registrazione sarà disponibile da quella data.')));
 }
 
@@ -763,7 +881,7 @@ async function importFile(file) {
 
 function renderDataTools() {
   const file = h('input', { type: 'file', accept: '.json,application/json', class: 'sr-only', id: 'backup-file', onchange: event => { importFile(event.target.files[0]); event.target.value = ''; } });
-  return h('section', { class: 'panel data-panel' }, h('h2', {}, 'I tuoi dati, con te.'), h('p', {}, 'Profilo e diario restano in questo browser. Non vengono inviati a un server e non si sincronizzano tra dispositivi.'),
+  return h('section', { class: 'panel data-panel' }, h('h2', {}, 'I tuoi dati, con te.'), h('p', {}, 'Profilo e diario restano in questo browser. Puoi inviare a Google Health soltanto i consumi che selezioni e confermi; non c’è una sincronizzazione automatica del diario.'),
     h('p', {}, 'La modalità privata, la cancellazione dei dati del browser o un cambio di dispositivo possono rimuoverli. Conserva un backup.'),
     file, h('div', { class: 'data-actions' },
       button('↓ Scarica backup JSON', downloadBackup, 'button secondary wide', { disabled: Boolean(storageReadError) }),
@@ -771,7 +889,7 @@ function renderDataTools() {
       storageReadError && button('Scarica dati originali', () => {
         try { downloadText(localStorage.getItem(STORAGE_KEY) || '', `pasti-recupero-${localDate()}.json`); } catch (error) { notify(error.message, true); }
       }, 'button secondary wide'),
-      button('Cancella tutti i dati', () => confirmAction('Cancellare profilo e diario?', 'Questa operazione rimuove definitivamente i dati di Pasti da questo browser. Prima puoi scaricare un backup. Non verranno cancellati eventuali backup già scaricati.', 'Cancella tutti i dati', () => {
+      button('Cancella profilo e diario', () => confirmAction('Cancellare profilo e diario?', 'Questa operazione rimuove profilo e diario da questo browser. Prima puoi scaricare un backup. Le voci Google e le ricevute tecniche locali degli invii rimangono: servono a evitare duplicati.', 'Cancella profilo e diario', () => {
         data = clearData(); storageReadError = null; unsaved = false; storageConflict = false; selectedDate = localDate(); notify('Dati locali cancellati.');
       }, true), 'text-button danger-text')));
 }
@@ -910,7 +1028,7 @@ function renderMethod() {
     h('section', { class: 'panel method-panel' }, h('h2', {}, 'Quando serve una valutazione personale'),
       h('p', {}, 'In gravidanza, allattamento, con patologie o disturbi alimentari il calcolo automatico si ferma. Anche un peso molto basso o elevato, o una stima energetica insolita, richiede attenzione e può generare avvisi. Questi controlli non valutano l’adeguatezza clinica del piano.'),
       h('p', {}, 'Il preallenamento è facoltativo: adattalo alla fame, alla digestione e alla tua routine. Gli orari proposti sono indicativi; non devi mangiare immediatamente prima di allenarti.')),
-    h('section', { class: 'panel method-panel' }, h('h2', {}, 'Dati e installazione'), h('p', {}, 'Profilo, diario e registrazioni delle attività restano in questo browser. Il collegamento a Google Health è facoltativo: le calorie lette e il token di accesso restano soltanto in memoria per la sessione e non entrano nei backup. Il profilo e i pasti non vengono inviati a Google.'),
+    h('section', { class: 'panel method-panel' }, h('h2', {}, 'Dati e installazione'), h('p', {}, 'Profilo, diario e registrazioni delle attività restano in questo browser. Il collegamento a Google Health è facoltativo: le calorie lette e i token restano soltanto in memoria. Con un permesso aggiuntivo puoi inviare i soli pasti consumati che selezioni e confermi. Le ricevute tecniche degli invii restano sul dispositivo, separate dal diario e dai backup.'),
       h('p', {}, 'I backup JSON contengono dati personali: conservali con attenzione. ', source('Come vengono usati i dati', './privacy.html')),
       h('p', {}, 'Puoi aggiungere Pasti alla schermata Home dal menu del browser. La pagina richiede una connessione per essere caricata.'), source('Documentazione del metodo', './docs/nutrition.md')));
 }
