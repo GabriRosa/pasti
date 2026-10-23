@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#173f35">
+    <title>Dati personali · Pasti</title>
+    <style>
+      :root { color-scheme: light; font-family: system-ui, sans-serif; color: #173f35; background: #f8f7ef; }
+      body { margin: 0; }
+      main { max-width: 720px; margin: 0 auto; padding: 36px 24px 64px; }
+      a { color: #285f4d; text-underline-offset: .18em; }
+      h1 { font-size: clamp(2rem, 6vw, 3rem); line-height: 1.1; margin-top: 32px; }
+      h2 { font-size: 1.25rem; margin-top: 32px; }
+      p, li { line-height: 1.65; }
+      .date { color: #5d6b62; font-size: .9rem; }
+      :focus-visible { outline: 3px solid #416e19; outline-offset: 4px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <a href="./#today">← Torna a Pasti</a>
+      <h1>Come vengono usati i dati</h1>
+      <p class="date">Aggiornato il 23 ottobre 2026</p>
+      <p>Pasti è un diario alimentare personale. Il profilo e i pasti sono conservati nel browser; il collegamento facoltativo a Google Health serve a leggere il consumo energetico della data aperta.</p>
+
+      <h2>Profilo, pasti e backup</h2>
+      <p>Età, peso, altezza, impostazioni, pasti, attività registrate ed etichette personalizzate restano nella memoria locale del browser. Il codice di Pasti non li invia a Google, a GitHub o a un server dell’applicazione.</p>
+      <p>In Profilo puoi scaricare un backup e cancellare i dati locali. Il backup contiene i dati del diario: conservalo dove desideri mantenerli privati. La cancellazione del sito dal browser può rimuovere il diario; un backup già scaricato va eliminato separatamente.</p>
+
+      <h2>Collegamento facoltativo a Google Health</h2>
+      <p>Il collegamento si avvia con una tua azione e usa la finestra di autorizzazione di Google. Pasti richiede il permesso di sola lettura per attività e fitness, necessario per leggere le calorie. Il permesso Google comprende questa categoria di dati; Pasti interroga soltanto l’identità del profilo Google Health e le calorie totali e attive.</p>
+      <p>Le richieste partono direttamente dal browser verso Google. Pasti non dispone di un server che riceva o conservi questi dati. L’identificativo del profilo serve a verificare il collegamento e non viene salvato nel diario.</p>
+      <p>Il token di accesso e i risultati delle letture rimangono in memoria durante la sessione. Non vengono salvati nel browser, nel backup o nel repository. Ricaricare o chiudere la pagina termina la sessione; alla scadenza dell’accesso è necessario ricollegarsi. Il sito aggiorna i dati soltanto durante la sessione aperta.</p>
+
+      <h2>Disconnettere e revocare</h2>
+      <p>Disconnetti elimina dalla sessione di Pasti il token e i risultati letti. Per revocare anche il permesso concesso a Google, apri le <a href="https://myaccount.google.com/connections" target="_blank" rel="noopener noreferrer">connessioni del tuo account Google</a> e rimuovi Pasti. I dati originali su Google Health restano nel tuo account.</p>
+
+      <h2>Servizi esterni</h2>
+      <p>GitHub Pages distribuisce i file pubblici del sito. Se il collegamento Google è configurato, Pasti carica la libreria ufficiale Google Identity Services per l’accesso. L’uso di questi servizi comporta normali richieste di rete dal browser ed è soggetto alle rispettive informative: <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement" target="_blank" rel="noopener noreferrer">GitHub</a> e <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">Google</a>.</p>
+      <p>Pasti non include strumenti pubblicitari o di analisi del traffico. Il codice dell’applicazione è consultabile nel <a href="https://github.com/GabriRosa/pasti" target="_blank" rel="noopener noreferrer">repository del progetto</a>.</p>
+    </main>
+  </body>
+</html>

@@ -1,5 +1,5 @@
-import { calculateTargets } from './nutrition.js?v=20261023-activity';
-import { validateTrainingPlan, validateTrainingLog } from './training.js?v=20261023-activity';
+import { calculateTargets } from './nutrition.js?v=20261023-google-health';
+import { validateTrainingPlan, validateTrainingLog } from './training.js?v=20261023-google-health';
 
 /** Local-only, versioned persistence. All writes validate before replacing data. */
 export const STORAGE_KEY = 'pasti.data.v1';

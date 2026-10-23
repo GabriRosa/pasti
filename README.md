@@ -1,6 +1,6 @@
 # Pasti
 
-Pasti è un diario alimentare in italiano che genera proposte giornaliere dai dati del profilo e permette di modificare alimenti e quantità. È un’app statica, senza dipendenze di runtime, pensata per GitHub Pages e per l’uso dal telefono.
+Pasti è un diario alimentare in italiano che genera proposte giornaliere dai dati del profilo e permette di modificare alimenti e quantità. È un’app statica, senza framework o passaggio di build, pensata per GitHub Pages e per l’uso dal telefono. Il collegamento facoltativo a Google Health usa Google Identity Services.
 
 ## Uso
 
@@ -11,6 +11,8 @@ L’orario iniziale degli allenamenti è 06:00. Puoi alternare corsa e sala attr
 Nella scheda **Attività svolta** scegli **Palestra**, **Corsa**, **Palestra + corsa** oppure **Riposo** per la data aperta. Il programma previsto resta separato dalla registrazione effettiva. Puoi correggere o annullare la scelta per oggi e per i giorni passati; i giorni futuri restano da registrare. La scelta viene conservata nel diario senza modificare pasti, deficit o calorie: il consumo medio include già gli allenamenti abituali.
 
 **Importa attività da CSV** legge localmente il file delle attività esportato da Strava e propone una registrazione per il solo giorno aperto. Conferma le colonne e come interpretare gli orari, controlla l’anteprima e applica il risultato. I tipi generici e le righe non interpretabili richiedono una scelta esplicita. Non è una sincronizzazione automatica. Vedi [collegamenti e importazione](docs/integrations.md) per requisiti e limiti.
+
+La scheda **Google Health** può leggere le calorie bruciate nella data aperta, distinguendo il totale dalla quota attiva già inclusa. Richiede la configurazione del client Google e il consenso dell’utente. Il collegamento dura per la sessione: la pagina può aggiornarsi ogni cinque minuti mentre è visibile; dopo una ricarica o la scadenza dell’accesso serve ricollegarsi. La scheda indica l’ora della lettura e segnala dati assenti o parziali. Il consumo letto da Google non modifica automaticamente gli obiettivi o i pasti. Lo stato di configurazione e i passaggi necessari sono descritti nella [guida ai collegamenti](docs/integrations.md).
 
 Il diario mostra obiettivo stimato, quantità pianificate e quantità consumate. Apri **Modifica porzioni e alternative** per cambiare un pasto o i grammi, poi **Segna mangiato** per registrarlo. La registrazione si può annullare. I giorni futuri si possono pianificare; la registrazione diventa disponibile dalla data scelta.
 
@@ -31,6 +33,8 @@ Il comando **Aggiorna i pasti da oggi in poi**, nella sezione Alimenti, applica 
 In **Profilo** puoi esportare o importare un backup JSON e cancellare i dati locali. L’importazione valida il file e chiede conferma prima di sostituire l’archivio. Il limite del backup è 5 MiB. Un conflitto fra schede blocca il salvataggio del modello obsoleto e richiede il ricaricamento.
 
 GitHub ospita i file dell’app; il profilo e il diario restano nel browser. Non c’è sincronizzazione automatica tra dispositivi. Cancellare i dati del sito può rimuovere l’archivio, quindi conserva un backup. Il manifest consente l’aggiunta alla schermata Home nei browser compatibili; il caricamento richiede una connessione.
+
+I token e i risultati di Google Health rimangono esclusivamente nella memoria della sessione e non entrano nei backup. Le richieste vanno direttamente a Google; Pasti non dispone di un backend che conservi questi dati. Disconnetti chiude la sessione locale; la revoca del consenso si gestisce nelle connessioni dell’account Google. Vedi [come vengono usati i dati](privacy.html).
 
 ## Calcoli
 
@@ -53,6 +57,8 @@ node --test tests/*.test.mjs
 ```
 
 [domain.test.mjs](tests/domain.test.mjs) verifica calcoli, porzioni e sostituzioni. [activity-import.test.mjs](tests/activity-import.test.mjs) verifica la lettura e l’aggregazione dei CSV. [integration.test.mjs](tests/integration.test.mjs) verifica persistenza e flussi applicativi con DOM e storage in memoria. I test automatici non sostituiscono la verifica visuale del browser.
+
+[google-health.test.mjs](tests/google-health.test.mjs) verifica intervalli italiani, dati delle API, paginazione e gestione degli errori usando risposte sintetiche. Le prove locali non dimostrano che un account Google contenga i dati desiderati: occorre completare il consenso e verificare una lettura reale.
 
 ## Pubblicazione
 

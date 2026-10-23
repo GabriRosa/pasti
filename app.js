@@ -1,9 +1,11 @@
-import { ACTIVITY_LEVELS, calculateTargets, sumMacros } from './src/nutrition.js?v=20261023-activity';
-import { FOODS, LIDL_FOOD_IDS, getFood } from './src/foods.js?v=20261023-activity';
-import { createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } from './src/planner.js?v=20261023-activity';
-import { trainingForDate, validateTrainingPlan, TRAINING_LOG_TYPES, validateTrainingLog, trainingLogLabel } from './src/training.js?v=20261023-activity';
-import { parseActivityCsv, suggestActivityColumns, summarizeActivityCsv } from './src/activity-import.js?v=20261023-activity';
-import { STORAGE_KEY, MAX_BACKUP_BYTES, createEmptyData, validateData, parseBackup, loadData, saveData, exportBackup, clearData } from './src/storage.js?v=20261023-activity';
+import { ACTIVITY_LEVELS, calculateTargets, sumMacros } from './src/nutrition.js?v=20261023-google-health';
+import { FOODS, LIDL_FOOD_IDS, getFood } from './src/foods.js?v=20261023-google-health';
+import { createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } from './src/planner.js?v=20261023-google-health';
+import { trainingForDate, validateTrainingPlan, TRAINING_LOG_TYPES, validateTrainingLog, trainingLogLabel } from './src/training.js?v=20261023-google-health';
+import { parseActivityCsv, suggestActivityColumns, summarizeActivityCsv } from './src/activity-import.js?v=20261023-google-health';
+import { STORAGE_KEY, MAX_BACKUP_BYTES, createEmptyData, validateData, parseBackup, loadData, saveData, exportBackup, clearData } from './src/storage.js?v=20261023-google-health';
+import { GOOGLE_HEALTH_CLIENT_ID } from './src/google-health-config.js?v=20261023-google-health';
+import { createGoogleHealthSession } from './src/google-health-session.js?v=20261023-google-health';
 
 const $ = selector => document.querySelector(selector);
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -25,6 +27,12 @@ let page = 'today';
 let labelFoodId = 'lentil-pasta-lidl';
 let toastTimer;
 let returnFocus;
+let healthRenderQueued = false;
+const healthSession = createGoogleHealthSession({ clientId: GOOGLE_HEALTH_CLIENT_ID, onChange: () => {
+  if (healthRenderQueued) return;
+  healthRenderQueued = true;
+  Promise.resolve().then(() => { healthRenderQueued = false; if (page === 'today') updateGoogleHealthPanel(); });
+} });
 
 function h(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
@@ -127,6 +135,7 @@ function render() {
     main.replaceChildren(storageNotice() || document.createDocumentFragment(), h('section', { class: 'empty-state panel' },
       h('h1', {}, 'Controlliamo i tuoi dati'), h('p', {}, error.message), button('Apri il profilo', () => { location.hash = 'profile'; })));
   }
+  healthSession.setContext({ dateKey: selectedDate, active: page === 'today' && Boolean(data.profile), visible: document.visibilityState !== 'hidden' });
 }
 
 function shiftDate(delta) {
@@ -177,6 +186,63 @@ function renderTrainingLog(day, planned) {
       : 'Il consumo totale medio comprende già gli allenamenti. Questa registrazione non aggiunge altre calorie.'),
       day.trainingLog && button('Annulla registrazione attività', () => recordTraining(undefined), 'text-button', { disabled: future })),
     h('div', { class: 'training-log-import' }, button('Importa attività da CSV', openActivityCsvImport, 'button secondary small', { disabled: future }), h('span', {}, 'File locale, senza sincronizzazione automatica.')));
+}
+
+function updateGoogleHealthPanel() {
+  const previous = $('.google-health-panel');
+  if (!previous) return;
+  const active = document.activeElement;
+  let insidePanel = false;
+  for (let node = active; node; node = node.parentNode) if (node === previous) { insidePanel = true; break; }
+  const focusId = insidePanel ? active.id : null;
+  const next = renderGoogleHealth();
+  previous.replaceWith(next);
+  if (insidePanel) {
+    const equivalent = focusId ? next.querySelector(`#${focusId}`) : null;
+    const target = equivalent && !equivalent.disabled ? equivalent : next.querySelector('#google-health-title');
+    target?.focus({ preventScroll: true });
+  }
+}
+
+function renderGoogleHealth() {
+  const state = healthSession.getState();
+  const result = state.data?.dateKey === selectedDate ? state.data : null;
+  const future = selectedDate > localDate();
+  const authenticating = ['authorizing', 'verifying'].includes(state.status);
+  const status = ({ unconfigured: 'In configurazione', disconnected: 'Non collegato', authorizing: 'Autorizzazione in corso', verifying: 'Verifica account', connected: 'Sessione collegata', expired: 'Sessione scaduta', account_not_linked: 'Account da collegare' })[state.status] || 'Non disponibile';
+  const dateTime = value => new Intl.DateTimeFormat('it-IT', { timeZone: 'Europe/Rome', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(value));
+  const coverage = (seconds, value) => {
+    if (!result.coverage.requestedSeconds) return 'In attesa del primo intervallo completo.';
+    if (value === null) return 'Nessun dato disponibile per questa metrica.';
+    if (seconds < result.coverage.requestedSeconds) return `Copertura parziale: ${Math.round(seconds / result.coverage.requestedSeconds * 100)}% dell’intervallo.`;
+    return 'Copertura dell’intervallo richiesto completa.';
+  };
+  const controls = h('div', { class: 'health-actions' });
+  if (state.status !== 'unconfigured') {
+    if (!state.ready && state.error?.code === 'GIS_UNAVAILABLE') controls.append(button('Riprova caricamento accesso', () => { void healthSession.prepare(); }, 'button secondary small', { id: 'health-retry' }));
+    else if (state.status === 'connected') {
+      controls.append(button(state.busy ? 'Lettura in corso…' : 'Aggiorna', () => { void healthSession.refresh(); }, 'button primary small', { id: 'health-refresh', disabled: state.busy || future }),
+        button('Cambia account', () => healthSession.connect(), 'button secondary small', { id: 'health-account', disabled: state.busy }),
+        button('Scollega questa sessione', () => healthSession.disconnect(), 'text-button', { id: 'health-disconnect' }));
+    } else controls.append(button(!state.ready ? 'Preparazione accesso…' : authenticating ? 'Accesso in corso…' : ['expired', 'account_not_linked'].includes(state.status) ? 'Ricollega Google Health' : 'Collega Google Health', () => healthSession.connect(), 'button primary small', { id: 'health-connect', disabled: !state.ready || authenticating || future }));
+  }
+  return h('section', { class: 'panel google-health-panel', 'aria-labelledby': 'google-health-title' },
+    h('div', { class: 'health-heading' }, h('div', {}, h('p', { class: 'eyebrow' }, 'CALORIE BRUCIATE'), h('h2', { id: 'google-health-title', tabindex: '-1' }, 'Google Health'), h('p', { class: 'helper' }, 'Fonti aggregate · dati separati dal piano alimentare')), h('span', { class: 'health-status', role: 'status' }, status)),
+    state.status === 'unconfigured' ? h('p', { class: 'health-explainer' }, 'Il collegamento è in configurazione. Nessun account Google Health è collegato e nessun dato salute viene letto.') :
+      h('p', { class: 'health-explainer' }, 'Il collegamento vale per questa sessione aperta e può richiedere una nuova autorizzazione dopo una scadenza o un ricaricamento. Pasti legge direttamente da Google e non invia il tuo diario, il profilo o i pasti.'),
+    future && h('p', { class: 'notice compact' }, 'Le calorie di un giorno futuro non vengono richieste.'),
+    state.error && h('p', { class: 'health-error', role: 'alert' }, state.error.message),
+    state.stale && result && h('p', { class: 'notice compact' }, 'Sono mostrati i dati dell’ultima lettura riuscita. L’aggiornamento automatico è sospeso fino a un nuovo tentativo manuale.'),
+    result ? h('div', {},
+      h('div', { class: 'health-metrics' },
+        h('div', {}, h('span', {}, 'Bruciate totali · riposo e attività'), h('strong', {}, result.totalKcal === null ? 'Non disponibile' : `${round(result.totalKcal)} kcal`), h('small', {}, coverage(result.coverage.totalSeconds, result.totalKcal))),
+        h('div', {}, h('span', {}, 'Calorie attive · già incluse nel totale'), h('strong', {}, result.activeKcal === null ? 'Non disponibile' : `${round(result.activeKcal)} kcal`), h('small', {}, coverage(result.coverage.activeSeconds, result.activeKcal)))),
+      h('p', { class: 'health-timestamps' }, `Intervallo ${dateTime(result.rangeStart)} – ${dateTime(result.rangeEnd)} · Europe/Rome. Ultima lettura: ${dateTime(result.fetchedAt)}.`)) :
+      state.status === 'connected' && !future && h('p', { class: 'health-explainer' }, state.busy ? 'Lettura delle calorie per la data selezionata…' : 'Nessuna lettura disponibile per questa data.'),
+    controls,
+    h('p', { class: 'helper health-footnote' }, h('a', { id: 'health-privacy', href: './privacy.html', target: '_blank', rel: 'noopener noreferrer' }, 'Come vengono usati i dati')),
+    h('p', { class: 'helper health-footnote' }, 'Le calorie attive sono già comprese nel totale: non vengono sommate al TDEE e non modificano il deficit o i pasti. L’ora di lettura non indica l’ultima sincronizzazione del dispositivo.'),
+    state.status !== 'unconfigured' && h('p', { class: 'helper health-footnote' }, 'Per oggi, la lettura si aggiorna ogni 5 minuti con pagina visibile e sessione valida. Nessun aggiornamento a pagina chiusa. Scollegare la sessione cancella i dati in memoria; per revocare il consenso usa ', h('a', { id: 'health-permissions', href: 'https://myaccount.google.com/connections', target: '_blank', rel: 'noopener noreferrer' }, 'le connessioni del tuo account Google'), '.'));
 }
 
 function openActivityCsvImport() {
@@ -315,13 +381,14 @@ function renderToday() {
     pageTitle('IL TUO DIARIO', selectedDate === localDate() ? 'Oggi, un passo alla volta.' : longDate(selectedDate),
       h('span', { class: 'day-subtitle' }, h('span', {}, longDate(selectedDate)), button('Vai ai pasti ↓', goToMeals, 'button primary small', { 'aria-controls': 'daily-meals-title' })), dateNavigation),
     renderTrainingLog(day, activity),
+    renderGoogleHealth(),
     selectedDate >= localDate() && profileKey(day.profileSnapshot) !== profileKey(data.profile) && day.meals.some(meal => !day.consumed[meal.id] && !day.skipped.includes(meal.id)) && h('section', { class: 'notice profile-change-notice' }, h('strong', {}, 'Questo giorno usa ancora il profilo precedente.'), h('p', {}, 'Il nuovo profilo è salvato. Puoi applicarlo ai piani da oggi in poi, mantenendo i pasti già registrati.'), button('Applica il profilo ai piani', applyProfileToPlans)),
     renderEnergyContext(day.targets),
     h('section', { class: 'daily-overview', 'aria-label': 'Bilancio del giorno' },
       h('div', { class: 'energy-hero' },
-        h('div', { class: 'overview-topline' }, h('span', { class: 'caps' }, 'ENERGIA CONSUMATA'), h('span', { class: 'day-badge', title: 'Allenamento previsto dal profilo', 'aria-label': `Allenamento previsto: ${activity.label}${activity.time ? ` alle ${activity.time}` : ''}` }, training ? `${activity.label} · ${activity.time}` : activity.label)),
+        h('div', { class: 'overview-topline' }, h('span', { class: 'caps' }, 'CALORIE ASSUNTE'), h('span', { class: 'day-badge', title: 'Allenamento previsto dal profilo', 'aria-label': `Allenamento previsto: ${activity.label}${activity.time ? ` alle ${activity.time}` : ''}` }, training ? `${activity.label} · ${activity.time}` : activity.label)),
         h('div', { class: 'energy-value' }, h('strong', {}, round(consumed.kcal)), h('span', {}, 'kcal')),
-        h('div', { class: 'energy-track', role: 'meter', 'aria-label': 'Calorie consumate rispetto all’obiettivo', 'aria-valuemin': 0, 'aria-valuemax': Math.max(day.targets.kcal, consumed.kcal), 'aria-valuenow': consumed.kcal, 'aria-valuetext': `${round(consumed.kcal)} consumate su ${round(day.targets.kcal)} kcal obiettivo` }, h('span', { style: `width:${Math.min(100, consumed.kcal / day.targets.kcal * 100)}%` })),
+        h('div', { class: 'energy-track', role: 'meter', 'aria-label': 'Calorie assunte rispetto all’obiettivo', 'aria-valuemin': 0, 'aria-valuemax': Math.max(day.targets.kcal, consumed.kcal), 'aria-valuenow': consumed.kcal, 'aria-valuetext': `${round(consumed.kcal)} assunte su ${round(day.targets.kcal)} kcal obiettivo` }, h('span', { style: `width:${Math.min(100, consumed.kcal / day.targets.kcal * 100)}%` })),
         h('div', { class: 'energy-footer' }, h('span', {}, remaining >= 0 ? `${round(remaining)} kcal all’obiettivo` : `${round(-remaining)} kcal oltre l’obiettivo`), h('span', {}, allEaten ? 'Pasti registrati ✓' : `${Object.keys(day.consumed).length} ${Object.keys(day.consumed).length === 1 ? 'pasto registrato' : 'pasti registrati'}`))),
       h('div', { class: 'energy-details' },
         h('div', {}, h('span', { class: 'caps' }, 'OBIETTIVO STIMATO'), h('strong', {}, round(day.targets.kcal), h('small', {}, ' kcal')), h('p', {}, 'Dal profilo di questo giorno')),
@@ -837,13 +904,15 @@ function renderMethod() {
     h('section', { class: 'panel method-panel' }, h('h2', {}, 'Come leggere il diario'), h('dl', { class: 'method-definitions' },
       h('dt', {}, 'Obiettivo stimato'), h('dd', {}, 'Il riferimento giornaliero calcolato con il profilo salvato per quella data.'),
       h('dt', {}, 'Pianificato'), h('dd', {}, 'La somma dei pasti del giorno, escluso il preallenamento se lo salti.'),
-      h('dt', {}, 'Consumato'), h('dd', {}, 'La somma dei soli pasti che hai segnato come mangiati. I pasti registrati conservano dosi e valori del momento.'),
+      h('dt', {}, 'Calorie assunte'), h('dd', {}, 'La somma dei soli pasti che hai segnato come mangiati. I pasti registrati conservano dosi e valori del momento. Le calorie bruciate da Google Health sono mostrate separatamente e non cambiano il piano.'),
       h('dt', {}, 'Grammi e alternative'), h('dd', {}, 'Le alternative cambiano i grammi e tutti i macronutrienti. Per pasta, riso e couscous considera il peso secco; per gli altri cibi leggi la nota.')),
       h('p', {}, 'Il diario conserva un’istantanea per ogni data aperta. Modificare il profilo o un’etichetta non riscrive i giorni già salvati. Puoi ancora modificare i pasti non registrati, uno per volta.')),
     h('section', { class: 'panel method-panel' }, h('h2', {}, 'Quando serve una valutazione personale'),
       h('p', {}, 'In gravidanza, allattamento, con patologie o disturbi alimentari il calcolo automatico si ferma. Anche un peso molto basso o elevato, o una stima energetica insolita, richiede attenzione e può generare avvisi. Questi controlli non valutano l’adeguatezza clinica del piano.'),
       h('p', {}, 'Il preallenamento è facoltativo: adattalo alla fame, alla digestione e alla tua routine. Gli orari proposti sono indicativi; non devi mangiare immediatamente prima di allenarti.')),
-    h('section', { class: 'panel method-panel' }, h('h2', {}, 'Dati e installazione'), h('p', {}, 'I dati sono conservati nella memoria di questo browser. Nessun account, nessun invio di profilo o diario a servizi esterni. I backup JSON contengono dati personali: conservali con attenzione.'), h('p', {}, 'Puoi aggiungere Pasti alla schermata Home dal menu del browser. La pagina richiede una connessione per essere caricata.'), source('Documentazione del metodo', './docs/nutrition.md')));
+    h('section', { class: 'panel method-panel' }, h('h2', {}, 'Dati e installazione'), h('p', {}, 'Profilo, diario e registrazioni delle attività restano in questo browser. Il collegamento a Google Health è facoltativo: le calorie lette e il token di accesso restano soltanto in memoria per la sessione e non entrano nei backup. Il profilo e i pasti non vengono inviati a Google.'),
+      h('p', {}, 'I backup JSON contengono dati personali: conservali con attenzione. ', source('Come vengono usati i dati', './privacy.html')),
+      h('p', {}, 'Puoi aggiungere Pasti alla schermata Home dal menu del browser. La pagina richiede una connessione per essere caricata.'), source('Documentazione del metodo', './docs/nutrition.md')));
 }
 
 window.addEventListener('hashchange', () => { render(); $('#main').focus({ preventScroll: true }); window.scrollTo({ top: 0, behavior: 'instant' }); });
@@ -858,3 +927,6 @@ window.addEventListener('storage', event => {
   const current = loadData(); data = current.data; storageReadError = current.error; render(); notify('Dati aggiornati dall’altra scheda.');
 });
 render();
+if (GOOGLE_HEALTH_CLIENT_ID) void healthSession.prepare();
+document.addEventListener?.('visibilitychange', () => healthSession.setContext({ dateKey: selectedDate, active: page === 'today' && Boolean(data.profile), visible: document.visibilityState !== 'hidden' }));
+window.addEventListener('pagehide', () => healthSession.disconnect());

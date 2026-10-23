@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import { calculateTargets, sumMacros } from '../src/nutrition.js';
 import { FOODS, LIDL_FOOD_IDS, getFood, foodMacros } from '../src/foods.js';
 import { createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } from '../src/planner.js';
@@ -346,7 +347,20 @@ class MemoryElement {
   append(...children) {
     for (const child of children) { child.parentNode = this; this.children.push(child); }
   }
-  replaceChildren(...children) { this._text = ''; this.children = []; this.append(...children); }
+  replaceChildren(...children) {
+    for (const child of this.children) child.parentNode = null;
+    this._text = ''; this.children = []; this.append(...children);
+  }
+  replaceWith(...nodes) {
+    const parent = this.parentNode;
+    if (!parent) return;
+    for (const node of nodes) if (node.parentNode) node.remove();
+    const index = parent.children.indexOf(this);
+    if (index < 0) return;
+    parent.children.splice(index, 1, ...nodes);
+    for (const node of nodes) node.parentNode = parent;
+    this.parentNode = null;
+  }
   remove() {
     if (this.parentNode) this.parentNode.children = this.parentNode.children.filter(child => child !== this);
     this.parentNode = null;
@@ -415,14 +429,18 @@ class MemoryElement {
 }
 
 let appImport = 0;
-async function bootApp(t, store, hash = 'today') {
+async function bootApp(t, store, hash = 'today', health = {}) {
   const body = new MemoryElement('body');
+  const head = new MemoryElement('head');
   for (const id of ['main', 'notifications', 'app-dialog']) {
     const element = new MemoryElement(id === 'app-dialog' ? 'dialog' : 'div');
     element.id = id; body.append(element);
   }
+  const documentEvents = new MemoryElement('document');
   const document = {
-    body, activeElement: body,
+    body, head, activeElement: body, visibilityState: 'visible',
+    addEventListener: documentEvents.addEventListener.bind(documentEvents),
+    dispatch: documentEvents.dispatch.bind(documentEvents),
     querySelector: selector => body.querySelector(selector),
     querySelectorAll: selector => body.querySelectorAll(selector),
     createElement: tag => new MemoryElement(tag),
@@ -441,15 +459,28 @@ async function bootApp(t, store, hash = 'today') {
     getAll(name) { return this.pairs.filter(pair => pair[0] === name).map(pair => pair[1]); }
   }
   const globals = { document, window, location, Node: MemoryElement, FormData: MemoryFormData, localStorage: store,
-    requestAnimationFrame: callback => callback(), setTimeout: () => 0, clearTimeout: () => {} };
+    requestAnimationFrame: callback => callback(), setTimeout: () => 0, clearTimeout: () => {},
+    google: { accounts: { oauth2: health.oauth } },
+    fetch: health.fetchImpl ?? (() => { throw new Error('Unexpected network request from integration test'); }) };
   const previous = Object.fromEntries(Object.keys(globals).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
-  t.after(() => {
+  t.after(async () => {
+    window.dispatch('pagehide');
+    await new Promise(resolve => setImmediate(resolve));
     for (const [key, descriptor] of Object.entries(previous)) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key];
     }
   });
-  await import(`../app.js?integration=${appImport += 1}`);
+  // Keep the production app and modules intact; substitute only the public
+  // deployment client ID so tests never depend on the developer's live setup.
+  const appURL = new URL('../app.js', import.meta.url);
+  let source = await readFile(appURL, 'utf8');
+  const configImport = /^import \{ GOOGLE_HEALTH_CLIENT_ID \} from ['"]\.\/src\/google-health-config\.js[^'"]*['"];$/m;
+  assert.match(source, configImport);
+  source = source.replace(configImport, `const GOOGLE_HEALTH_CLIENT_ID = ${JSON.stringify(health.clientId ?? '')};`)
+    .replace(/from (['"])(\.\/[^'"]+)\1/g, (_, quote, path) => `from ${quote}${new URL(path, appURL).href}${quote}`);
+  await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}#integration-${appImport += 1}`);
+  await new Promise(resolve => setImmediate(resolve));
   return { document, window, location, navigate(page) { location.hash = `#${page}`; window.dispatch('hashchange'); } };
 }
 
@@ -1911,3 +1942,197 @@ test('a CSV save failure keeps the previous persisted diary and exposes an unsav
   assert.doesNotMatch(document.querySelector('#notifications').textContent, /Registrato da CSV/);
   assert.equal(store.writes, 1);
 });
+
+const HEALTH_TEST_TOKEN = 'synthetic-health-ui-token';
+const HEALTH_TEST_SCOPE = 'https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly';
+const healthReply = (body, status = 200) => ({ status, url: '', redirected: false, text: async () => JSON.stringify(body) });
+
+function standardHealthReply(url, init, total = 321, active = 0) {
+  if (url.endsWith('/identity')) return healthReply({ healthUserId: 'private-ui-test-health-id' });
+  const { range } = JSON.parse(init.body);
+  const field = url.includes('/total-calories/') ? 'totalCalories' : 'activeEnergyBurned';
+  return healthReply({ rollupDataPoints: [{ startTime: range.startTime,
+    endTime: new Date(Date.parse(range.startTime) + 60000).toISOString(),
+    [field]: { kcalSum: field === 'totalCalories' ? total : active } }] });
+}
+
+async function bootHealthApp(t, data, handler = standardHealthReply) {
+  const store = new MemoryStorage(); saveData(data, store);
+  const configs = [];
+  const requests = [];
+  const calls = [];
+  const app = await bootApp(t, store, 'today', {
+    clientId: 'public-ui-test.apps.googleusercontent.com',
+    oauth: { initTokenClient(config) {
+      configs.push(config);
+      return { requestAccessToken(request) { requests.push(request); } };
+    } },
+    fetchImpl: async (url, init) => { calls.push({ url, init }); return handler(url, init); },
+  });
+  const script = app.document.head.querySelector('script');
+  assert.ok(script);
+  assert.equal(script.src, 'https://accounts.google.com/gsi/client');
+  script.dispatch('load');
+  await new Promise(resolve => setImmediate(resolve));
+  const authorize = async () => {
+    app.document.querySelector('.health-actions button.primary').click();
+    assert.ok(configs.length);
+    await configs.at(-1).callback({ access_token: HEALTH_TEST_TOKEN, expires_in: 3600, scope: HEALTH_TEST_SCOPE });
+    await new Promise(resolve => setImmediate(resolve));
+  };
+  return { ...app, store, configs, requests, calls, authorize };
+}
+
+test('an unconfigured Google Health panel has no fake values, consent or network activity', async t => {
+  const { data } = activityLogFixture();
+  const store = new MemoryStorage(); saveData(data, store);
+  const original = store.getItem(STORAGE_KEY);
+  const { document } = await bootApp(t, store);
+  assert.match(document.querySelector('.google-health-panel').textContent, /In configurazione/);
+  assert.equal(document.querySelector('.health-metrics'), null);
+  assert.equal(document.querySelector('.health-actions button'), null);
+  assert.equal(document.head.querySelector('script'), null);
+  assert.equal(store.getItem(STORAGE_KEY), original);
+});
+
+test('Google Health consent, partial calorie display and disconnection leave the entire diary and backup unchanged', async t => {
+  const { data } = activityLogFixture();
+  const { document, store, configs, requests, calls, authorize } = await bootHealthApp(t, data, (url, init) =>
+    url.includes('/active-energy-burned/') ? healthReply({}) : standardHealthReply(url, init, 0));
+  const original = store.getItem(STORAGE_KEY);
+  const backup = exportBackup(data);
+  const meter = document.querySelector('[role="meter"]').attributes['aria-valuenow'];
+  assert.equal(calls.length, 0);
+  assert.equal(configs.length, 0);
+  assert.equal(requests.length, 0);
+  assert.equal(document.querySelector('.health-status').textContent, 'Non collegato');
+  assert.equal(document.querySelector('.health-metrics'), null);
+  await authorize();
+  assert.equal(configs[0].scope, HEALTH_TEST_SCOPE);
+  assert.equal(configs[0].include_granted_scopes, false);
+  assert.deepEqual(requests, [{ prompt: 'select_account' }]);
+  assert.equal(calls.length, 3);
+  assert.equal(document.querySelector('.health-status').textContent, 'Sessione collegata');
+  assert.deepEqual(document.querySelectorAll('.health-metrics strong').map(node => node.textContent), ['0 kcal', 'Non disponibile']);
+  assert.match(document.querySelector('.health-metrics').textContent, /Copertura parziale/);
+  assert.match(document.querySelector('.health-timestamps').textContent, /Ultima lettura/);
+  assert.match(document.querySelector('.google-health-panel').textContent, /Fonti aggregate/);
+  assert.doesNotMatch(document.body.textContent, /synthetic-health-ui-token|private-ui-test-health-id/);
+  assert.equal(document.querySelector('[role="meter"]').attributes['aria-valuenow'], meter);
+  assert.equal(store.getItem(STORAGE_KEY), original);
+  assert.equal(exportBackup(loadData(store).data), backup);
+  document.querySelectorAll('.health-actions button').find(button => button.textContent === 'Scollega questa sessione').click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(document.querySelector('.health-status').textContent, 'Non collegato');
+  assert.equal(document.querySelector('.health-metrics'), null);
+  assert.equal(store.getItem(STORAGE_KEY), original);
+  assert.equal(store.writes, 1);
+});
+
+test('a Google Health API revocation removes displayed calories and offers explicit reconnection', async t => {
+  const { data } = activityLogFixture();
+  let revoked = false;
+  const { document, store, calls, authorize } = await bootHealthApp(t, data, (url, init) => revoked
+    ? healthReply({ error: { message: HEALTH_TEST_TOKEN } }, 401) : standardHealthReply(url, init));
+  await authorize();
+  const original = store.getItem(STORAGE_KEY);
+  revoked = true;
+  document.querySelector('.health-actions button.primary').click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(document.querySelector('.health-status').textContent, 'Sessione scaduta');
+  assert.equal(document.querySelector('.health-metrics'), null);
+  assert.equal(document.querySelector('.health-actions button.primary').textContent, 'Ricollega Google Health');
+  assert.match(document.querySelector('.health-error').textContent, /scaduta/);
+  assert.doesNotMatch(document.body.textContent, /synthetic-health-ui-token/);
+  assert.equal(calls.length, 4);
+  assert.equal(store.getItem(STORAGE_KEY), original);
+  assert.equal(store.writes, 1);
+});
+
+test('an unavailable second Health metric never becomes a fake zero or a usable first total', async t => {
+  const { data } = activityLogFixture();
+  const { document, store, authorize } = await bootHealthApp(t, data, (url, init) => url.includes('/active-energy-burned/')
+    ? healthReply({ error: { message: HEALTH_TEST_TOKEN } }, 503) : standardHealthReply(url, init));
+  const original = store.getItem(STORAGE_KEY);
+  await authorize();
+  assert.equal(document.querySelector('.health-metrics'), null);
+  assert.match(document.querySelector('.health-error').textContent, /non è raggiungibile/);
+  assert.doesNotMatch(document.querySelector('.google-health-panel').textContent, /321 kcal|0 kcal|synthetic-health-ui-token/);
+  assert.equal(store.getItem(STORAGE_KEY), original);
+});
+
+test('a late Google Health response cannot appear on the newly selected diary date or write its data', async t => {
+  const { data, key, pastKey } = activityLogFixture();
+  let releaseOld;
+  let oldRequest;
+  const { document, store, configs } = await bootHealthApp(t, data, (url, init) => {
+    if (url.includes('/total-calories/') && JSON.parse(init.body).range.startTime.includes(dateOffset(key, -1))) {
+      oldRequest = { url, init };
+      return new Promise(resolve => { releaseOld = resolve; });
+    }
+    return standardHealthReply(url, init, 123, 0);
+  });
+  const original = store.getItem(STORAGE_KEY);
+  document.querySelector('.health-actions button.primary').click();
+  const authorization = configs[0].callback({ access_token: HEALTH_TEST_TOKEN, expires_in: 3600, scope: HEALTH_TEST_SCOPE });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(oldRequest);
+  chooseDiaryDate(document, pastKey);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(document.querySelectorAll('.health-metrics strong').map(node => node.textContent), ['123 kcal', '0 kcal']);
+  releaseOld(standardHealthReply(oldRequest.url, oldRequest.init, 999, 0));
+  await authorization;
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(document.querySelectorAll('.health-metrics strong').map(node => node.textContent), ['123 kcal', '0 kcal']);
+  assert.equal(store.getItem(STORAGE_KEY), original);
+  assert.equal(store.writes, 1);
+});
+
+for (const outcome of ['success', 'error']) {
+  test(`a background Health ${outcome} preserves the meal dialog, edited grams and keyboard focus`, async t => {
+    const { data, key } = activityLogFixture();
+    let nextPending = false;
+    let pending;
+    const { document, store, authorize } = await bootHealthApp(t, data, (url, init) => {
+      if (nextPending && url.includes('/total-calories/')) {
+        nextPending = false;
+        return new Promise(resolve => { pending = { url, init, resolve }; });
+      }
+      return standardHealthReply(url, init);
+    });
+    await authorize();
+    const original = store.getItem(STORAGE_KEY);
+    nextPending = true;
+    document.querySelector('.health-actions button.primary').click();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.ok(pending);
+    const list = document.querySelector('.meal-list');
+    const lunchIndex = data.days[key].meals.findIndex(item => item.slot === 'lunch');
+    const editButton = document.querySelectorAll('.meal-card')[lunchIndex].querySelector('.meal-actions button');
+    editButton.focus(); editButton.click();
+    const dialog = document.querySelector('#app-dialog');
+    const content = dialog.children[0];
+    const grams = dialog.querySelector('.edit-ingredients input');
+    const newGrams = grams.valueAsNumber + 7;
+    grams.value = String(newGrams); grams.dispatch('input'); grams.focus();
+    pending.resolve(outcome === 'success' ? standardHealthReply(pending.url, pending.init, 456)
+      : healthReply({ error: { message: HEALTH_TEST_TOKEN } }, 503));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(document.querySelector('.meal-list'), list, 'A calorie refresh must not rebuild meal controls');
+    assert.equal(document.querySelector('#app-dialog'), dialog);
+    assert.equal(dialog.open, true);
+    assert.equal(dialog.children[0], content);
+    assert.equal(dialog.querySelector('.edit-ingredients input'), grams);
+    assert.equal(grams.valueAsNumber, newGrams);
+    assert.equal(document.activeElement, grams);
+    assert.equal(grams.isConnected, true);
+    assert.equal(editButton.isConnected, true);
+    assert.equal(store.getItem(STORAGE_KEY), original);
+    if (outcome === 'success') assert.match(document.querySelector('.health-metrics').textContent, /456 kcal/);
+    else assert.match(document.querySelector('.health-error').textContent, /non è raggiungibile/);
+    dialog.querySelector('.dialog-actions button.secondary').click();
+    assert.equal(document.activeElement, editButton, 'Cancel must return focus to the same connected meal control');
+    assert.equal(store.getItem(STORAGE_KEY), original);
+    assert.equal(store.writes, 1);
+  });
+}
