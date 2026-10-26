@@ -1,4 +1,4 @@
-import { validateTrainingPlan } from './training.js?v=20261023-google-health-sync';
+import { validateTrainingPlan } from './training.js?v=20261026-chocolate-plan';
 
 /** Estimates for healthy adults. See docs/nutrition.md for assumptions and sources. */
 export const ACTIVITY_LEVELS = Object.freeze([
@@ -45,6 +45,16 @@ export function calculateTargets(profile) {
   if (profile.deficitKcal !== undefined && (typeof profile.deficitKcal !== 'number' || !Number.isFinite(profile.deficitKcal) || profile.deficitKcal < 0)) {
     throw new Error('Il deficit in kcal deve essere un numero finito maggiore o uguale a zero.');
   }
+  const fixed = profile.nutritionTargets;
+  if (fixed !== undefined) {
+    if (!fixed || typeof fixed !== 'object' || Array.isArray(fixed) || Object.keys(fixed).some(key => !['kcal', 'protein', 'fat'].includes(key))) throw new Error('Obiettivi personalizzati non validi.');
+    numberInRange(fixed.kcal, 500, 10000, 'Calorie scelte');
+    numberInRange(fixed.protein, 1, 500, 'Proteine scelte');
+    numberInRange(fixed.fat, 1, 500, 'Grassi scelti');
+    if (fixed.protein * 4 + fixed.fat * 9 >= fixed.kcal) throw new Error('Proteine e grassi devono lasciare energia disponibile ai carboidrati.');
+  }
+  if (profile.mealPlan !== undefined && !['rotating', 'chocolate-2200'].includes(profile.mealPlan)) throw new Error('Piano pasti non valido.');
+  if (profile.routineNotes !== undefined && (typeof profile.routineNotes !== 'string' || profile.routineNotes.length > 1500)) throw new Error('Le note devono contenere al massimo 1500 caratteri.');
   validateTrainingPlan(profile.trainingPlan);
   if (profile.specialCondition !== undefined && typeof profile.specialCondition !== 'boolean') {
     throw new Error('La voce sulle condizioni particolari deve essere sì o no.');
@@ -66,40 +76,40 @@ export function calculateTargets(profile) {
   const bmr = 10 * profile.weight + 6.25 * profile.height - 5 * profile.age + (profile.sex === 'male' ? 5 : -161);
   const tdee = bmr * activity.factor;
   const bmi = profile.weight / (profile.height / 100) ** 2;
-  const explicitDeficit = profile.goal === 'lose' && profile.deficitKcal !== undefined;
+  const explicitDeficit = !fixed && profile.goal === 'lose' && profile.deficitKcal !== undefined;
   if (explicitDeficit && profile.deficitKcal >= tdee) {
     throw new Error('Il deficit deve essere inferiore al dispendio totale giornaliero stimato (TDEE), così l’obiettivo resta positivo.');
   }
-  let kcal = explicitDeficit ? tdee - profile.deficitKcal : tdee * (profile.goal === 'lose' ? 0.9 : profile.goal === 'gain' ? 1.05 : 1);
+  let kcal = fixed ? fixed.kcal : explicitDeficit ? tdee - profile.deficitKcal : tdee * (profile.goal === 'lose' ? 0.9 : profile.goal === 'gain' ? 1.05 : 1);
   if (bmi < 18.5) {
     warnings.push('Il rapporto peso/altezza indica possibile sottopeso: valuta le stime con un professionista.');
-    if (explicitDeficit && profile.deficitKcal > 0) {
+    if ((fixed && kcal < tdee) || (explicitDeficit && profile.deficitKcal > 0)) {
       throw new Error('Con possibile sottopeso il deficit selezionato non può essere applicato. Scegli mantenimento (0 kcal di deficit) e valuta il profilo con un professionista.');
     }
-    if (profile.goal === 'lose' && !explicitDeficit) {
+    if (profile.goal === 'lose' && !explicitDeficit && !fixed) {
       kcal = tdee;
       warnings.push('Il deficit automatico è disattivato: viene mostrata solo la stima di mantenimento.');
     }
   }
   if (bmi >= 30) warnings.push('Con un rapporto peso/altezza elevato, calorie e proteine richiedono una valutazione individuale.');
   if (profile.age > 78 || profile.age === 18) warnings.push('L’età è fuori dall’intervallo 19–78 anni del campione originale: la stima è meno documentata.');
-  const proteinPerKg = profile.goal === 'lose' && kcal < tdee ? 1.8 : 1.6;
+  const proteinPerKg = fixed ? fixed.protein / profile.weight : profile.goal === 'lose' && kcal < tdee ? 1.8 : 1.6;
   // Keep protein from crowding out the other macronutrients at extreme inputs.
-  const protein = Math.min(profile.weight * proteinPerKg, kcal * 0.35 / 4);
-  if (protein < profile.weight * proteinPerKg) {
+  const protein = fixed ? fixed.protein : Math.min(profile.weight * proteinPerKg, kcal * 0.35 / 4);
+  if (!fixed && protein < profile.weight * proteinPerKg) {
     warnings.push('La stima proteica è limitata al 35% dell’energia per lasciare spazio agli altri nutrienti; personalizzala con un professionista.');
   }
-  const fat = kcal * 0.3 / 9;
+  const fat = fixed ? fixed.fat : kcal * 0.3 / 9;
   const carbs = (kcal - protein * 4 - fat * 9) / 4;
   if (kcal < 1500 || kcal > 3500) warnings.push('La stima calorica è bassa o elevata rispetto a un uso comune: controlla i dati e non considerarla una prescrizione.');
   if (activity.factor >= 1.725) warnings.push('Il fattore di attività elevato include già gli allenamenti: non aggiungere altre calorie per corsa o sala attrezzi.');
   warnings.push('Sono stime iniziali per adulti sani. Il dispendio medio include già corsa, sala attrezzi e attività quotidiana; i giorni di riposo mantengono lo stesso obiettivo.');
-  const energyMethod = explicitDeficit
+  const energyMethod = fixed ? `obiettivo scelto ${fixed.kcal} kcal (il deficit reale non è misurato)` : explicitDeficit
     ? `obiettivo = TDEE − ${profile.deficitKcal} kcal`
     : `energia × ${profile.goal === 'gain' ? 1.05 : kcal < tdee ? 0.9 : 1}${profile.goal === 'lose' && kcal < tdee ? ' (profilo precedente: deficit automatico del 10%)' : ''}`;
 
   return {
     bmr, tdee, kcal, protein, carbs, fat, warnings,
-    method: `Mifflin–St Jeor (forma arrotondata): 10 × kg + 6,25 × cm − 5 × anni ${profile.sex === 'male' ? '+ 5' : '− 161'}. Attività × ${activity.factor}; ${energyMethod}; proteine orientative ${proteinPerKg} g/kg (massimo 35% energia); grassi 30%, carboidrati residui. Fonti: https://doi.org/10.1093/ajcn/51.2.241 ; https://doi.org/10.1186/s12970-017-0177-8 . Fattori e ripartizione sono scelte orientative dell’app.`,
+    method: `Mifflin–St Jeor (forma arrotondata): 10 × kg + 6,25 × cm − 5 × anni ${profile.sex === 'male' ? '+ 5' : '− 161'}. Attività × ${activity.factor}; ${energyMethod}; ${fixed ? `proteine scelte ${protein} g (${proteinPerKg.toFixed(2)} g/kg), grassi scelti ${fat} g` : `proteine orientative ${proteinPerKg} g/kg (massimo 35% energia); grassi 30%`}, carboidrati residui. Fonti: https://doi.org/10.1093/ajcn/51.2.241 ; https://doi.org/10.1186/s12970-017-0177-8 . Fattori e ripartizione sono scelte orientative dell’app.`,
   };
 }

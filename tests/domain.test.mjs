@@ -184,7 +184,7 @@ test('main alternatives cover every requested carb and protein with full macro t
   const targets = calculateTargets(profile);
   const main = makeMeal([{ foodId: 'pasta', grams: 100 }, { foodId: 'chicken', grams: 150 }, { foodId: 'vegetables', grams: 200 }, { foodId: 'olive-oil', grams: 15 }]);
   const alternatives = mealAlternatives(main, targets);
-  assert.equal(alternatives.length, 36);
+  assert.equal(alternatives.length, 48);
   for (const id of ['pasta', 'rice', 'couscous', 'potatoes', 'lentil-pasta-lidl', 'lentil-pasta-lidl-fresh', 'chicken', 'eggs', 'egg-whites', 'salmon', 'tuna', 'pork-tenderloin']) assert.ok(alternatives.some(meal => grams(meal, id) > 0), id);
   for (const meal of alternatives) {
     checkMeal(meal);

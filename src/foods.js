@@ -1,10 +1,28 @@
 const crea = code => `https://www.alimentinutrizione.it/tabelle-nutrizionali/${code}`;
 const food = (id, name, group, kcal, protein, carbs, fat, unitNote, source, estimated = false, label) =>
-  Object.freeze({ id, name, group, kcal, protein, carbs, fat, unitNote, source, estimated,
+  Object.freeze({ id, name, group, kcal, protein, carbs, fat, unitNote, source, estimated, unit: id == 'skim-milk' ? 'ml' : 'g',
     ...(label ? { label: Object.freeze(label) } : {}) });
 
 /** Values per 100 g edible portion. Traces in CREA are represented as zero. */
 export const FOODS = Object.freeze([
+  food('skim-milk', 'Latte scremato', 'breakfast', 36, 3.6, 5.3, 0.2,
+    'Quantità in ml; valori indicativi per 100 ml. Usa l’etichetta del tuo latte.', 'https://www.crea.gov.it/en/-/tabella-di-composizione-degli-alimenti', true),
+  food('whey', 'Proteine whey in polvere', 'breakfast', 113 / 0.3, 80, 1.4 / 0.3, 1.3 / 0.3,
+    'Peso della polvere: 30 g forniscono circa 24 g di proteine. Il misurino non è un peso universale: controlla gusto ed etichetta.', 'https://www.optimumnutrition.it/product/whey-gold-standard', true),
+  food('greek-yogurt-fage', 'Yogurt greco FAGE Total 0%', 'breakfast', 54, 10.3, 3, 0,
+    'Peso del prodotto pronto da mangiare.', 'https://it.fage/prodotti/yogurt-bianco/fage-total-0'),
+  food('chocolate-85', 'Cioccolato fondente 85% · Lindt Excellence', 'fat', 584, 12.5, 22, 46,
+    'Peso prima di scioglierlo. Riferimento 85%: verifica l’etichetta se cambi tavoletta.', 'https://www.lindt.it/tavoletta-excellence-85-100g'),
+  food('chocolate-70', 'Cioccolato fondente 70% · Lindt Excellence', 'fat', 566, 9.5, 34, 41,
+    'Peso prima di scioglierlo. Riferimento 70%: verifica l’etichetta se cambi tavoletta.', 'https://www.lindt.it/tavoletta-di-cioccolato-fondente-excellence-70-100g'),
+  food('apple', 'Mela', 'fruit', 44, 0.2, 10, 0,
+    'Peso della parte edibile, senza torsolo e scarti.', 'https://www.crea.gov.it/en/-/tabella-di-composizione-degli-alimenti'),
+  food('passata', 'Passata di pomodoro', 'vegetable', 21, 1.3, 3, 0.2,
+    'Peso del prodotto. Olio aggiunto da conteggiare separatamente.', 'https://www.crea.gov.it/en/-/tabella-di-composizione-degli-alimenti'),
+  food('turkey', 'Petto di tacchino', 'protein', 107, 24, 0, 1.2,
+    'Peso a crudo senza pelle e ossa. Consumare cotto.', 'https://www.crea.gov.it/en/-/tabella-di-composizione-degli-alimenti'),
+  food('cod', 'Filetti di merluzzo surgelati', 'protein', 68, 15.6, 0, 0.6,
+    'Peso a crudo, al netto della glassatura di ghiaccio e degli scarti. Consumare cotto.', 'https://www.crea.gov.it/en/-/tabella-di-composizione-degli-alimenti'),
   food('pasta', 'Pasta di semola', 'carb', 341, 13.5, 72.7, 1.2, 'Peso a crudo, pasta secca.', crea('000800')),
   food('rice', 'Riso', 'carb', 334, 6.7, 80.4, 0.4, 'Peso a crudo, riso secco.', crea('000100')),
   food('couscous', 'Couscous', 'carb', 361, 13.7, 76.5, 1.1, 'Peso a secco prima di aggiungere acqua.', crea('000045')),

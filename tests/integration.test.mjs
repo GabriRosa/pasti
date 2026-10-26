@@ -298,10 +298,12 @@ test('all catalog foods provide persistable ingredient quantities and finite con
   const data = generatedDiary();
   const first = data.days['2026-10-23'];
   const lunch = first.meals.find(item => item.slot === 'lunch');
-  const complete = mealFromIngredients({ ...lunch, ingredients: FOODS.map(item => ({ foodId: item.id, grams: 10 })) });
-  first.meals = first.meals.map(item => item.id === lunch.id ? complete : item);
-  assert.deepEqual(parseBackup(exportBackup(data)), data);
-  assertMacrosClose(complete.macros, sumMacros(FOODS.map(item => foodMacros(item.id, 10))));
+  for (const item of FOODS) {
+    const complete = mealFromIngredients({ ...lunch, ingredients: [{ foodId: item.id, grams: 10 }] });
+    first.meals = first.meals.map(meal => meal.id === lunch.id ? complete : meal);
+    assert.deepEqual(parseBackup(exportBackup(data)), data);
+    assertMacrosClose(complete.macros, foodMacros(item.id, 10));
+  }
 });
 
 // Exercise the app's real event handlers without a browser or a layout engine.
@@ -451,7 +453,7 @@ async function bootApp(t, store, hash = 'today', health = {}) {
   const location = { hash: `#${hash}` };
   class MemoryFormData {
     constructor(form) {
-      this.pairs = form.querySelectorAll('input, select').filter(control => !control.isDisabled && control.attributes.name
+      this.pairs = form.querySelectorAll('input, select, textarea').filter(control => !control.isDisabled && control.attributes.name
         && !(control.attributes.type === 'checkbox' && !control.checked))
         .map(control => [control.attributes.name, control.attributes.type === 'checkbox' ? control.value || 'on' : control.value]);
     }
@@ -1152,7 +1154,7 @@ test('onboarding offers daily alternation and shows live rest, TDEE and explicit
   for (const [name, value] of Object.entries({ age: 35, sex: 'male', weight: 80, height: 180, activity: 'moderate', goal: 'lose' })) {
     setProfileControl(form, name, value);
   }
-  assert.deepEqual(displayedEstimateNumbers(document), [1755, 2720, null]);
+  assert.deepEqual(displayedEstimateNumbers(document), [1755, 2720, null], document.querySelector('.live-estimates').textContent);
   form.dispatch('submit');
   assert.equal(store.getItem(STORAGE_KEY), null, 'A missing deficit cannot silently become a default');
   for (const deficit of [500, 250, 0]) {
@@ -2136,3 +2138,29 @@ for (const outcome of ['success', 'error']) {
     assert.equal(store.writes, 1);
   });
 }
+
+test('personal menu selection saves fixed targets and applies only to uneaten current and future meals', async t => {
+  const { data, key, pastKey, futureKey } = profileApplicationFixture();
+  const store = new MemoryStorage(); saveData(data, store);
+  const { document, navigate } = await bootApp(t, store, 'profile');
+  const form = document.querySelector('.profile-form');
+  setProfileControl(form, 'mealPlan', 'chocolate-2200');
+  setProfileControl(form, 'routineNotes', 'Passi e allenamenti annotati localmente.');
+  assert.equal(form.querySelector('[name="targetMode"]').value, 'fixed');
+  assert.equal(displayedEstimateNumbers(document)[2],2200);
+  form.dispatch('submit');
+  let actual=loadData(store).data;
+  assert.deepEqual(actual.profile.nutritionTargets,{kcal:2200,protein:144,fat:80});
+  assert.equal(actual.profile.routineNotes,'Passi e allenamenti annotati localmente.');
+  assert.deepEqual(actual.days,data.days);
+  document.querySelector('.profile-change-notice button').click();
+  document.querySelector('.dialog-actions button.primary').click();
+  actual=loadData(store).data;
+  assert.deepEqual(actual.days[pastKey],data.days[pastKey]);
+  assert.deepEqual(actual.days[key].consumed,data.days[key].consumed);
+  assert.equal(actual.days[futureKey].targets.kcal,2200);
+  assert.ok(actual.days[futureKey].meals.find(x=>x.slot==='breakfast').ingredients.some(x=>x.foodId==='skim-milk'&&x.grams===250));
+  navigate('profile');
+  assert.equal(document.querySelector('[name="targetMode"]').value,'fixed');
+  assert.equal(document.querySelector('[name="routineNotes"]').textContent,'Passi e allenamenti annotati localmente.');
+});

@@ -1,6 +1,6 @@
-import { getGoogleHealthDay, verifyGoogleHealthAccount } from './google-health.js?v=20261023-google-health-sync';
-import { prepareGoogleHealthConsumedMeal, syncGoogleHealthConsumedMeal } from './google-health-nutrition.js?v=20261023-google-health-sync';
-import { createGoogleHealthReceiptStore, googleHealthAccountKey, googleHealthMealKey } from './google-health-receipts.js?v=20261023-google-health-sync';
+import { getGoogleHealthDay, verifyGoogleHealthAccount } from './google-health.js?v=20261026-chocolate-plan';
+import { prepareGoogleHealthConsumedMeal, syncGoogleHealthConsumedMeal } from './google-health-nutrition.js?v=20261026-chocolate-plan';
+import { createGoogleHealthReceiptStore, googleHealthAccountKey, googleHealthMealKey } from './google-health-receipts.js?v=20261026-chocolate-plan';
 
 export const GOOGLE_HEALTH_SCOPE = 'https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly';
 export const GOOGLE_HEALTH_NUTRITION_SCOPE = 'https://www.googleapis.com/auth/googlehealth.nutrition.writeonly';

@@ -34,6 +34,29 @@ Le proteine sono impostate a 1,6 g/kg per mantenimento e aumento, a 1,8 g/kg dur
 
 La ripartizione lascia il 30% dell’energia ai grassi e assegna il residuo ai carboidrati. Le proteine sono limitate al 35% dell’energia, con un avviso quando questo limite riduce i grammi per kg. Il 30%, il limite del 35% e la quota residua sono regole di composizione dell’app: non costituiscono target clinici esatti. Per questa sola ripartizione si usano 4 kcal/g per proteine e carboidrati e 9 kcal/g per grassi.
 
+### Obiettivi scelti nel profilo
+
+Il campo opzionale `nutritionTargets: {kcal, protein, fat}` prevale sul calcolo automatico. Il TDEE continua a derivare dal profilo, mentre i carboidrati sono `(kcal - 4 × protein - 9 × fat) / 4`. Gli obiettivi espliciti non usano il limite proteico automatico del 35%. La validazione richiede valori finiti, positivi e una quota energetica residua positiva per i carboidrati; mantiene il controllo sul deficit in possibile sottopeso. Il deficit mostrato è una differenza rispetto alla stima, non una misurazione.
+
+`routineNotes` conserva fino a 1.500 caratteri su attività e preferenze nel browser, senza modificarne i calcoli. I profili precedenti restano validi. L’applicazione ai giorni futuri usa il flusso esistente e conserva storico e pasti consumati.
+
+### Piano con latte scremato e cioccolato
+
+`mealPlan: 'chocolate-2200'` seleziona porzioni fisse; l’assenza del campo conserva le proposte a rotazione. Gli orari si adattano al calendario: spuntino cinque minuti prima della seduta e colazione indicativamente un’ora dopo l’inizio. La fine effettiva dell’allenamento determina l’orario del pasto. Nei giorni di riposo restano gli stessi alimenti e la banana può essere unita alla colazione.
+
+| Pasto | Quantità |
+| --- | --- |
+| Prima dell’allenamento | Banana 120 g senza buccia |
+| Colazione | Latte scremato 250 ml, whey 30 g, FAGE Total 0% 150 g, avena 20 g, fondente 85% 30 g, mela 150 g edibili |
+| Pranzo | Pasta secca 90 g, pollo crudo 120 g, passata 150 g, zucchine crude 250 g, olio EVO 30 g |
+| Cena | Riso secco 65 g, filetti di merluzzo crudi senza glassatura 220 g, zucchine crude 250 g, olio EVO 30 g, mela 150 g edibili |
+
+Con il catalogo iniziale, la somma è 2.200,3 kcal, 144,075 g di proteine, 81,82 g di grassi e 220,68 g di carboidrati. Il riferimento scelto resta 2.200 kcal, 144 g di proteine, 80 g di grassi e 226 g di carboidrati. Gli override delle etichette ricalcolano i totali; cambiare il riferimento non ridimensiona le porzioni fisse.
+
+Le alternative Milbona conservano latte, uno shaker da 30 g, cioccolato e mela. Il planner adatta dessert e avena alle calorie e proteine della colazione base, arrotondando le dosi a 5 g; mostra gli scostamenti reali nei macro. Restano disponibili entrambi i gusti di budino e mousse. Per pranzo e cena le alternative comprendono pasta, riso, couscous, patate, le due paste di lenticchie Lidl, pollo, tacchino, merluzzo, uova, albumi, salmone, tonno e filetto di maiale. Il bilanciamento considera tutte le proteine del piatto.
+
+Riferimenti aggiunti: [FAGE Total 0%](https://it.fage/prodotti/yogurt-bianco/fage-total-0), [Lindt 85%](https://www.lindt.it/tavoletta-excellence-85-100g), [Lindt 70%](https://www.lindt.it/tavoletta-di-cioccolato-fondente-excellence-70-100g), [whey di riferimento](https://www.optimumnutrition.it/product/whey-gold-standard), [tabelle CREA](https://www.crea.gov.it/en/-/tabella-di-composizione-degli-alimenti). Latte e whey hanno valori indicativi da confrontare con la confezione; 30 g di polvere non equivalgono a 30 g di proteine. `skim-milk` usa valori e quantità per 100 ml; il campo interno `grams` conserva il numero di ml per questa voce e l’interfaccia mostra l’unità corretta.
+
 ### Controlli sui dati
 
 Il calcolatore accetta età 18–100 anni, peso 35–250 kg e altezza 130–230 cm. Rifiuta numeri mancanti, negativi, non finiti e scelte sconosciute. Questi limiti validano l’input e non garantiscono l’idoneità del piano.
@@ -42,7 +65,7 @@ Con `specialCondition: true` il calcolo si interrompe: gravidanza, allattamento,
 
 ## Catalogo e fonti
 
-Tutti i numeri sono riferiti a 100 g di parte edibile. I cereali e la pasta secca si pesano a secco; la pasta fresca come venduta prima della cottura. Carne e pesce si pesano a crudo senza scarti, il tonno al naturale dopo averlo sgocciolato. Pane, yogurt, dessert e gallette si pesano come consumati. Olio e cioccolato includono l’intera quantità utilizzata. Acqua di cottura e acqua aggiunta non modificano i nutrienti del prodotto secco; il peso cotto invece cambia.
+I numeri sono riferiti a 100 g di parte edibile, salvo il latte scremato, espresso per 100 ml. I cereali e la pasta secca si pesano a secco; la pasta fresca come venduta prima della cottura. Carne e pesce si pesano a crudo senza scarti, il tonno al naturale dopo averlo sgocciolato. Pane, yogurt, dessert e gallette si pesano come consumati. Olio e cioccolato includono l’intera quantità utilizzata. Acqua di cottura e acqua aggiunta non modificano i nutrienti del prodotto secco; il peso cotto invece cambia.
 
 Fonti consultate il 22–23 ottobre 2026:
 

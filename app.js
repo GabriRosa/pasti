@@ -1,12 +1,12 @@
-import { ACTIVITY_LEVELS, calculateTargets, sumMacros } from './src/nutrition.js?v=20261023-google-health-sync';
-import { FOODS, LIDL_FOOD_IDS, getFood } from './src/foods.js?v=20261023-google-health-sync';
-import { createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } from './src/planner.js?v=20261023-google-health-sync';
-import { trainingForDate, validateTrainingPlan, TRAINING_LOG_TYPES, validateTrainingLog, trainingLogLabel } from './src/training.js?v=20261023-google-health-sync';
-import { parseActivityCsv, suggestActivityColumns, summarizeActivityCsv } from './src/activity-import.js?v=20261023-google-health-sync';
-import { STORAGE_KEY, MAX_BACKUP_BYTES, createEmptyData, validateData, parseBackup, loadData, saveData, exportBackup, clearData } from './src/storage.js?v=20261023-google-health-sync';
-import { GOOGLE_HEALTH_CLIENT_ID } from './src/google-health-config.js?v=20261023-google-health-sync';
-import { createGoogleHealthSession } from './src/google-health-session.js?v=20261023-google-health-sync';
-import { prepareGoogleHealthConsumedMeal } from './src/google-health-nutrition.js?v=20261023-google-health-sync';
+import { ACTIVITY_LEVELS, calculateTargets, sumMacros } from './src/nutrition.js?v=20261026-chocolate-plan';
+import { FOODS, LIDL_FOOD_IDS, getFood } from './src/foods.js?v=20261026-chocolate-plan';
+import { createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } from './src/planner.js?v=20261026-chocolate-plan';
+import { trainingForDate, validateTrainingPlan, TRAINING_LOG_TYPES, validateTrainingLog, trainingLogLabel } from './src/training.js?v=20261026-chocolate-plan';
+import { parseActivityCsv, suggestActivityColumns, summarizeActivityCsv } from './src/activity-import.js?v=20261026-chocolate-plan';
+import { STORAGE_KEY, MAX_BACKUP_BYTES, createEmptyData, validateData, parseBackup, loadData, saveData, exportBackup, clearData } from './src/storage.js?v=20261026-chocolate-plan';
+import { GOOGLE_HEALTH_CLIENT_ID } from './src/google-health-config.js?v=20261026-chocolate-plan';
+import { createGoogleHealthSession } from './src/google-health-session.js?v=20261026-chocolate-plan';
+import { prepareGoogleHealthConsumedMeal } from './src/google-health-nutrition.js?v=20261026-chocolate-plan';
 
 const $ = selector => document.querySelector(selector);
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -15,7 +15,7 @@ const formatDecimal = value => Number(value.toFixed(1)).toLocaleString('it-IT');
 const localDate = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 const longDate = key => new Intl.DateTimeFormat('it-IT', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date(`${key}T12:00:00`));
 const CARBS = ['pasta', 'rice', 'couscous', 'potatoes', 'lentil-pasta-lidl', 'lentil-pasta-lidl-fresh'];
-const PROTEINS = ['chicken', 'eggs', 'egg-whites', 'salmon', 'tuna', 'pork-tenderloin'];
+const PROTEINS = ['chicken', 'eggs', 'egg-whites', 'salmon', 'tuna', 'pork-tenderloin', 'turkey', 'cod'];
 const DAYS = [{ value: 1, label: 'Lun' }, { value: 2, label: 'Mar' }, { value: 3, label: 'Mer' }, { value: 4, label: 'Gio' }, { value: 5, label: 'Ven' }, { value: 6, label: 'Sab' }, { value: 0, label: 'Dom' }];
 const TRAINING_TYPES = [{ id: 'rest', label: 'Riposo' }, { id: 'run', label: 'Corsa' }, { id: 'strength', label: 'Sala attrezzi' }];
 const loaded = loadData();
@@ -502,6 +502,8 @@ function renderToday() {
     renderGoogleHealth(),
     selectedDate >= localDate() && profileKey(day.profileSnapshot) !== profileKey(data.profile) && day.meals.some(meal => !day.consumed[meal.id] && !day.skipped.includes(meal.id)) && h('section', { class: 'notice profile-change-notice' }, h('strong', {}, 'Questo giorno usa ancora il profilo precedente.'), h('p', {}, 'Il nuovo profilo è salvato. Puoi applicarlo ai piani da oggi in poi, mantenendo i pasti già registrati.'), button('Applica il profilo ai piani', applyProfileToPlans)),
     renderEnergyContext(day.targets),
+    day.profileSnapshot.routineNotes && h('details', { class: 'panel routine-notes' }, h('summary', {}, 'La tua attività e le preferenze'), h('p', { style: 'white-space:pre-wrap' }, day.profileSnapshot.routineNotes)),
+    day.profileSnapshot.mealPlan === 'chocolate-2200' && h('p', { class: 'notice compact' }, 'Piano con latte scremato, uno shaker e cioccolato al posto della frutta secca. Stessa colazione per corsa e pesi. I macro pianificati sono la somma delle quantità sotto; possono differire leggermente dai riferimenti scelti.'),
     h('section', { class: 'daily-overview', 'aria-label': 'Bilancio del giorno' },
       h('div', { class: 'energy-hero' },
         h('div', { class: 'overview-topline' }, h('span', { class: 'caps' }, 'CALORIE ASSUNTE'), h('span', { class: 'day-badge', title: 'Allenamento previsto dal profilo', 'aria-label': `Allenamento previsto: ${activity.label}${activity.time ? ` alle ${activity.time}` : ''}` }, training ? `${activity.label} · ${activity.time}` : activity.label)),
@@ -509,7 +511,7 @@ function renderToday() {
         h('div', { class: 'energy-track', role: 'meter', 'aria-label': 'Calorie assunte rispetto all’obiettivo', 'aria-valuemin': 0, 'aria-valuemax': Math.max(day.targets.kcal, consumed.kcal), 'aria-valuenow': consumed.kcal, 'aria-valuetext': `${round(consumed.kcal)} assunte su ${round(day.targets.kcal)} kcal obiettivo` }, h('span', { style: `width:${Math.min(100, consumed.kcal / day.targets.kcal * 100)}%` })),
         h('div', { class: 'energy-footer' }, h('span', {}, remaining >= 0 ? `${round(remaining)} kcal all’obiettivo` : `${round(-remaining)} kcal oltre l’obiettivo`), h('span', {}, allEaten ? 'Pasti registrati ✓' : `${Object.keys(day.consumed).length} ${Object.keys(day.consumed).length === 1 ? 'pasto registrato' : 'pasti registrati'}`))),
       h('div', { class: 'energy-details' },
-        h('div', {}, h('span', { class: 'caps' }, 'OBIETTIVO STIMATO'), h('strong', {}, round(day.targets.kcal), h('small', {}, ' kcal')), h('p', {}, 'Dal profilo di questo giorno')),
+        h('div', {}, h('span', { class: 'caps' }, day.profileSnapshot.nutritionTargets ? 'OBIETTIVO SCELTO' : 'OBIETTIVO STIMATO'), h('strong', {}, round(day.targets.kcal), h('small', {}, ' kcal')), h('p', {}, 'Dal profilo di questo giorno')),
         h('div', {}, h('span', { class: 'caps' }, 'PIANIFICATO'), h('strong', {}, round(planned.kcal), h('small', {}, ' kcal')), h('p', {}, `${planned.kcal >= day.targets.kcal ? '+' : '−'}${round(Math.abs(planned.kcal - day.targets.kcal))} kcal rispetto all’obiettivo`)))),
     h('section', { class: 'macro-grid', 'aria-label': 'Macronutrienti consumati' }, ...[
       { key: 'protein', name: 'Proteine', color: 'protein' }, { key: 'carbs', name: 'Carboidrati', color: 'carbs' }, { key: 'fat', name: 'Grassi', color: 'fat' },
@@ -522,14 +524,14 @@ function renderToday() {
         h('p', { class: 'macro-caption' }, delta > 0 ? `${round(delta)} g oltre l’obiettivo` : `Pianificati ${round(planned[macro.key])} g`));
     })),
     ...day.targets.warnings.map(warning => h('div', { class: 'notice compact' }, warning)),
-    h('div', { class: 'section-heading' }, h('div', {}, h('h2', { id: 'daily-meals-title', tabindex: '-1', class: 'scroll-target' }, 'I pasti del giorno'), h('p', {}, 'Scegli le alternative. Adatta i grammi. Registra ciò che mangi.'), h('p', { class: 'weight-legend' }, 'Pesi a crudo/secco, salvo alimenti pronti. Tonno sgocciolato; uova senza guscio. Orari indicativi.')), selectedDate !== localDate() && button('Torna a oggi', () => { selectedDate = localDate(); render(); }, 'text-button')),
+    h('div', { class: 'section-heading' }, h('div', {}, h('h2', { id: 'daily-meals-title', tabindex: '-1', class: 'scroll-target' }, 'I pasti del giorno'), h('p', {}, 'Scegli le alternative. Adatta i grammi. Registra ciò che mangi.'), h('p', { class: 'weight-legend' }, 'Pesi a crudo/secco, salvo alimenti pronti. Latte in ml; frutta senza scarti; merluzzo senza ghiaccio; tonno sgocciolato; uova senza guscio. Olio di cottura incluso. Orari indicativi.')), selectedDate !== localDate() && button('Torna a oggi', () => { selectedDate = localDate(); render(); }, 'text-button')),
     h('div', { class: 'meal-list' }, ...day.meals.map((meal, index) => renderMeal(meal, day, index))),
-    !training && h('div', { class: 'rest-note' }, h('span', { 'aria-hidden': 'true' }, '☀'), h('p', {}, 'Oggi il piano prevede colazione, pranzo e cena. Il preallenamento compare nei giorni di corsa o sala attrezzi.')),
+    !training && day.profileSnapshot.mealPlan !== 'chocolate-2200' && h('div', { class: 'rest-note' }, h('span', { 'aria-hidden': 'true' }, '☀'), h('p', {}, 'Oggi il piano prevede colazione, pranzo e cena. Il preallenamento compare nei giorni di corsa o sala attrezzi.')),
     h('p', { class: 'page-footnote' }, 'Le quantità sono una base da adattare. I valori sono stime e non una prescrizione nutrizionale. ', h('a', { href: '#method' }, 'Leggi il metodo')));
 }
 
 function ingredientText(ingredient) {
-  return `${getFood(ingredient.foodId, data.foodOverrides).name} · ${formatDecimal(ingredient.grams)} g`;
+  return `${getFood(ingredient.foodId, data.foodOverrides).name} · ${formatDecimal(ingredient.grams)} ${getFood(ingredient.foodId).unit}`;
 }
 
 function renderMeal(meal, day, index) {
@@ -538,7 +540,7 @@ function renderMeal(meal, day, index) {
   const displayMeal = eaten ? day.consumed[meal.id].meal : meal;
   const activity = trainingForDate(day.profileSnapshot, day.dateKey);
   const afterTraining = activity.type !== 'rest' && meal.time > activity.time;
-  const slotName = ({ preworkout: 'Prima dell’allenamento', breakfast: afterTraining ? 'Colazione dopo allenamento' : 'Colazione', lunch: 'Pranzo', dinner: 'Cena' })[meal.slot];
+  const slotName = ({ preworkout: activity.type === 'rest' ? 'Spuntino' : 'Prima dell’allenamento', breakfast: afterTraining ? 'Colazione dopo allenamento' : 'Colazione', lunch: 'Pranzo', dinner: 'Cena' })[meal.slot];
   const future = selectedDate > localDate();
   return h('article', { class: `meal-card${eaten ? ' eaten' : ''}${skipped ? ' skipped' : ''}` },
     h('div', { class: 'meal-rail' }, h('span', { class: 'meal-index' }, eaten ? '✓' : String(index + 1).padStart(2, '0')), h('span', { class: 'meal-time', title: 'Orario indicativo', 'aria-label': `Orario indicativo: ${meal.time}` }, meal.time)),
@@ -614,7 +616,7 @@ function editMeal(original) {
     }
     ingredientFields.replaceChildren(...draft.ingredients.map((ingredient, index) => {
       const food = getFood(ingredient.foodId, data.foodOverrides);
-      const grams = h('input', { id: `ingredient-${index}`, type: 'number', min: '0', max: '3000', step: '0.1', inputmode: 'decimal', value: Number(ingredient.grams.toFixed(1)), 'aria-label': `${food.name}, grammi`, oninput: event => {
+      const grams = h('input', { id: `ingredient-${index}`, type: 'number', min: '0', max: '3000', step: '0.1', inputmode: 'decimal', value: Number(ingredient.grams.toFixed(1)), 'aria-label': `${food.name}, ${food.unit === 'ml' ? 'millilitri' : 'grammi'}`, oninput: event => {
         adaptation.hidden = true;
         adaptation.replaceChildren();
         const value = event.target.valueAsNumber;
@@ -622,7 +624,7 @@ function editMeal(original) {
         draft.ingredients[index].grams = value;
         updateTotals();
       } });
-      return h('div', { class: 'edit-ingredient' }, h('div', {}, h('label', { for: `ingredient-${index}` }, food.name), h('small', {}, food.unitNote)), h('div', { class: 'gram-control' }, grams, h('span', {}, 'g')));
+      return h('div', { class: 'edit-ingredient' }, h('div', {}, h('label', { for: `ingredient-${index}` }, food.name), h('small', {}, food.unitNote)), h('div', { class: 'gram-control' }, grams, h('span', {}, food.unit)));
     }));
     updateTotals();
   };
@@ -671,7 +673,7 @@ function profileKey(profile) {
   const plan = profile.trainingPlan;
   const schedule = !plan ? null : plan.mode === 'alternating' ? [plan.mode, plan.startDate, plan.firstType] : [plan.mode, ...plan.days];
   return JSON.stringify([profile.age, profile.sex, profile.weight, profile.height, profile.activity, profile.goal,
-    profile.deficitKcal ?? null, profile.trainingTime, [...profile.trainingDays].sort(), schedule, profile.specialCondition]);
+    profile.deficitKcal ?? null, profile.nutritionTargets ?? null, profile.mealPlan ?? null, profile.routineNotes ?? null, profile.trainingTime, [...profile.trainingDays].sort(), schedule, profile.specialCondition]);
 }
 
 function renderEnergyContext(targets) {
@@ -679,7 +681,7 @@ function renderEnergyContext(targets) {
   return h('section', { class: 'daily-estimates', 'aria-label': 'Stime del fabbisogno giornaliero' },
     h('div', {}, h('span', {}, 'Riposo stimato'), h('strong', {}, `${round(targets.bmr)} kcal`)),
     h('div', {}, h('span', {}, 'Consumo totale medio'), h('strong', {}, `${round(targets.tdee)} kcal`)),
-    h('div', {}, h('span', {}, difference < 0 ? 'Surplus applicato' : 'Deficit applicato'), h('strong', {}, `${round(Math.abs(difference))} kcal`)));
+    h('div', {}, h('span', {}, difference < 0 ? 'Surplus stimato' : 'Deficit stimato'), h('strong', {}, `${round(Math.abs(difference))} kcal`)));
 }
 
 function renderProfileForm() {
@@ -698,6 +700,16 @@ function renderProfileForm() {
   const input = (name, attrs) => h('input', { name, value: profile?.[name] ?? '', required: true, ...attrs });
   const deficitInput = h('input', { name: 'deficitKcal', type: 'number', min: 0, step: 1, inputmode: 'numeric', value: profile?.deficitKcal ?? legacyDeficit ?? '', placeholder: 'Scegli le kcal da sottrarre' });
   const deficitField = field('Deficit giornaliero scelto · kcal', deficitInput, 'Puoi scegliere anche 0 kcal. La scelta deve essere inferiore al consumo totale medio.');
+  const targetMode = h('select', { name: 'targetMode' },
+    h('option', { value: 'automatic', selected: !profile?.nutritionTargets }, 'Dal consumo stimato e dal deficit'),
+    h('option', { value: 'fixed', selected: Boolean(profile?.nutritionTargets) }, 'Calorie e macro scelti da me'));
+  const targetFields = h('div', { class: 'form-grid' }, ...[
+    ['kcal', 'Calorie al giorno · kcal', 2200], ['protein', 'Proteine al giorno · g', 144], ['fat', 'Grassi al giorno · g', 80],
+  ].map(([key, label, fallback]) => field(label, h('input', { name: `target-${key}`, type: 'number', min: 1, max: key === 'kcal' ? 10000 : 500, step: '0.1', required: true, value: profile?.nutritionTargets?.[key] ?? fallback }))));
+  const mealPlanSelect = h('select', { name: 'mealPlan' },
+    h('option', { value: 'rotating', selected: profile?.mealPlan !== 'chocolate-2200' }, 'Proposte variate e porzioni automatiche'),
+    h('option', { value: 'chocolate-2200', selected: profile?.mealPlan === 'chocolate-2200' }, 'Piano 2.200 kcal · shaker, latte scremato e cioccolato'));
+  const planNote = h('p', { class: 'helper' }, 'Il piano da 2.200 kcal usa porzioni fisse: circa 144 g di proteine, 82 g di grassi e 221 g di carboidrati. Il riferimento scelto è 144 g di proteine, 80 g di grassi e 226 g di carboidrati. Le alternative ricalcolano i valori. Cambiare il riferimento non ridimensiona queste porzioni.');
   const legacyNote = legacyDeficit !== undefined ? h('p', { class: 'notice compact' }, `Prima usavi il deficit automatico del 10%. La proposta convertita è ${round(legacyDeficit)} kcal: puoi modificarla e confermarla salvando il profilo.`) : null;
   const modeSelect = h('select', { name: 'trainingMode', required: true },
     h('option', { value: 'alternating', selected: initialPlan.mode === 'alternating' }, 'Alternanza quotidiana: corsa / sala attrezzi'),
@@ -719,7 +731,9 @@ function renderProfileForm() {
       field('Altezza · cm', input('height', { type: 'number', min: 130, max: 230, step: '0.1', inputmode: 'decimal', placeholder: 'cm' }))),
     field('Attività abituale', h('select', { name: 'activity', required: true }, h('option', { value: '', selected: !profile }, 'Scegli il livello di attività…'), ...ACTIVITY_LEVELS.map(level => h('option', { value: level.id, selected: profile?.activity === level.id }, level.label))), 'Considera la tua intera settimana, corsa e sala attrezzi incluse. Il totale è una media quotidiana.'),
     field('Il tuo obiettivo', h('select', { name: 'goal', required: true }, h('option', { value: '', selected: !profile }, 'Scegli un obiettivo…'), ...[{ id: 'lose', name: 'Perdere peso gradualmente' }, { id: 'maintain', name: 'Mantenere il peso' }, { id: 'gain', name: 'Aumentare il peso gradualmente' }].map(goal => h('option', { value: goal.id, selected: profile?.goal === goal.id }, goal.name)))),
-    deficitField, legacyNote, preview,
+    field('Come impostare gli obiettivi', targetMode), deficitField, legacyNote, targetFields,
+    field('Piano dei pasti', mealPlanSelect), planNote, preview,
+    field('Attività, obiettivi e preferenze personali', h('textarea', { name: 'routineNotes', rows: 5, maxlength: 1500 }, profile?.routineNotes ?? ''), 'Annota passi, frequenza e durata degli allenamenti, andamento del peso e preferenze. Queste note restano nel browser e non modificano automaticamente il consumo stimato.'),
     h('div', { class: 'form-divider' }), h('h2', { class: 'form-section-title' }, 'Il calendario degli allenamenti'),
     field('Orario di allenamento', h('input', { name: 'trainingTime', type: 'time', value: profile?.trainingTime || '06:00', required: true })),
     field('Organizzazione', modeSelect), alternating, weekly, trainingPreview,
@@ -739,7 +753,13 @@ function renderProfileForm() {
       trainingDays: trainingPlan.mode === 'alternating' ? [0, 1, 2, 3, 4, 5, 6] : trainingPlan.days.flatMap((type, day) => type === 'rest' ? [] : [day]),
       specialCondition: values.get('specialCondition') === 'on',
     };
-    if (candidate.goal === 'lose') {
+    if (values.get('mealPlan') === 'chocolate-2200') candidate.mealPlan = 'chocolate-2200';
+    const notes = String(values.get('routineNotes') ?? '').trim();
+    if (notes) candidate.routineNotes = notes;
+    if (targetMode.value === 'fixed') {
+      candidate.nutritionTargets = Object.fromEntries(['kcal', 'protein', 'fat'].map(key => [key, Number(values.get(`target-${key}`))]));
+    }
+    if (candidate.goal === 'lose' && !candidate.nutritionTargets) {
       if (deficitInput.value === '') {
         if (requireDeficit) throw new Error('Scegli il deficit in kcal, anche 0 se vuoi mantenere il consumo stimato.');
       } else candidate.deficitKcal = Number(deficitInput.value);
@@ -748,8 +768,12 @@ function renderProfileForm() {
   };
   const updatePreview = () => {
     const goal = form.querySelector('[name="goal"]').value;
-    deficitField.hidden = goal !== 'lose'; deficitInput.disabled = goal !== 'lose'; deficitInput.required = goal === 'lose';
-    if (legacyNote) legacyNote.hidden = goal !== 'lose';
+    const fixed = targetMode.value === 'fixed';
+    deficitField.hidden = goal !== 'lose' || fixed; deficitInput.disabled = deficitField.hidden; deficitInput.required = !deficitField.hidden;
+    targetFields.hidden = !fixed;
+    targetFields.querySelectorAll('input').forEach(control => { control.disabled = !fixed; });
+    planNote.hidden = mealPlanSelect.value !== 'chocolate-2200';
+    if (legacyNote) legacyNote.hidden = goal !== 'lose' || fixed;
     alternating.hidden = modeSelect.value !== 'alternating'; weekly.hidden = modeSelect.value !== 'weekly';
     alternating.querySelectorAll('input, select').forEach(control => { control.disabled = alternating.hidden; });
     weekly.querySelectorAll('select').forEach(control => { control.disabled = weekly.hidden; });
@@ -770,21 +794,29 @@ function renderProfileForm() {
     }
     try {
       const candidate = readProfile(false); validateTrainingPlan(candidate.trainingPlan);
-      const baselineProfile = { ...candidate, goal: 'maintain' }; delete baselineProfile.deficitKcal;
+      const baselineProfile = { ...candidate, goal: 'maintain' }; delete baselineProfile.deficitKcal; delete baselineProfile.nutritionTargets;
       const baseline = calculateTargets(baselineProfile);
       let targets; let targetError;
       try {
-        if (goal === 'lose' && candidate.deficitKcal === undefined) throw new Error('Scegli il deficit in kcal, anche 0 se vuoi mantenere il consumo stimato.');
+        if (goal === 'lose' && !candidate.nutritionTargets && candidate.deficitKcal === undefined) throw new Error('Scegli il deficit in kcal, anche 0 se vuoi mantenere il consumo stimato.');
         targets = calculateTargets(candidate);
       } catch (failure) { targetError = failure.message; }
       preview.replaceChildren(h('div', { class: 'estimate-steps' },
         h('div', {}, h('span', {}, '1 · Riposo stimato'), h('strong', {}, `${round(baseline.bmr)} kcal`)),
         h('div', {}, h('span', {}, '2 · Consumo totale medio'), h('strong', {}, `${round(baseline.tdee)} kcal`)),
-        h('div', {}, h('span', {}, goal === 'lose' ? '3 · Obiettivo dopo deficit' : '3 · Obiettivo giornaliero'), h('strong', {}, targets ? `${round(targets.kcal)} kcal` : '—'))),
-        targetError ? h('p', { class: 'form-error' }, targetError) : h('p', { class: 'helper' }, `Differenza applicata dal consumo totale: ${round(Math.abs(targets.tdee - targets.kcal))} kcal${targets.kcal > targets.tdee ? ' in più' : ' in meno'}. Corsa e sala attrezzi sono già comprese nel fattore di attività.`),
+        h('div', {}, h('span', {}, fixed ? '3 · Obiettivo scelto' : goal === 'lose' ? '3 · Obiettivo dopo deficit' : '3 · Obiettivo giornaliero'), h('strong', {}, targets ? `${round(targets.kcal)} kcal` : '—'))),
+        targetError ? h('p', { class: 'form-error' }, targetError) : h('p', { class: 'helper' }, `Differenza stimata dal consumo totale: ${round(Math.abs(targets.tdee - targets.kcal))} kcal${targets.kcal > targets.tdee ? ' in più' : ' in meno'}. Corsa e sala attrezzi sono già comprese nel fattore di attività.`),
+        ...(targets ? [h('p', { class: 'helper' }, `Proteine ${formatDecimal(targets.protein)} g (${formatDecimal(targets.protein / candidate.weight)} g/kg) · Grassi ${formatDecimal(targets.fat)} g · Carboidrati ${formatDecimal(targets.carbs)} g. Il deficit effettivo va verificato con l’andamento del peso.`)] : []),
         ...(targets?.warnings ?? []).map(warning => h('p', { class: 'helper estimate-warning' }, warning)));
     } catch (failure) { preview.replaceChildren(h('p', { class: 'form-error' }, failure.message)); }
   };
+  mealPlanSelect.addEventListener('change', () => {
+    if (mealPlanSelect.value === 'chocolate-2200') {
+      targetMode.value = 'fixed';
+      for (const [key, value] of Object.entries({ kcal: 2200, protein: 144, fat: 80 })) form.querySelector(`[name="target-${key}"]`).value = value;
+    }
+    updatePreview();
+  });
   form.querySelectorAll('input, select').forEach(control => { control.addEventListener('input', updatePreview); control.addEventListener('change', updatePreview); });
   form.addEventListener('submit', event => {
     event.preventDefault();
@@ -801,7 +833,7 @@ function renderProfileForm() {
 }
 
 function renderProfile() {
-  return h('div', { class: 'page' }, pageTitle('LE TUE INFORMAZIONI', 'Il tuo profilo.', 'Scegli il deficit e organizza corsa, sala attrezzi e riposo.'),
+  return h('div', { class: 'page' }, pageTitle('LE TUE INFORMAZIONI', 'Il tuo profilo.', 'Scegli calorie e macro, le porzioni dei pasti e il programma di allenamento.'),
     h('div', { class: 'profile-layout' }, h('section', { class: 'panel profile-panel' }, renderProfileForm()),
       h('aside', { class: 'profile-side' }, data.profile && h('section', { class: 'panel target-preview' }, h('h2', {}, 'Applica il profilo salvato'),
         h('p', {}, 'Aggiorna gli obiettivi e rigenera i pasti ancora da consumare da oggi in poi. I pasti già mangiati e i giorni passati restano invariati.'),
@@ -969,7 +1001,7 @@ function renderFoods() {
     field('Prodotto', h('select', { value: labelFoodId, onchange: event => { labelFoodId = event.target.value; render(); } }, ...orderedFoods.map(item => h('option', { value: item.id, selected: item.id === labelFoodId }, item.name)))),
     h('div', { class: 'food-estimate-note' }, foodStatus(food), h('p', {}, data.foodOverrides[labelFoodId] ? 'Valori personalizzati dalla tua etichetta. Prevalgono sui valori del catalogo.' : food.label ? 'I valori di questa variante sono già inseriti. Puoi modificarli se la tua confezione è diversa per prodotto, gusto o formato.' : 'Valori di riferimento già presenti nel catalogo. La modifica è facoltativa, per una confezione con valori diversi.'), labelReference(food)),
     h('div', { class: 'form-grid label-grid' }, ...[{ key: 'kcal', label: 'Energia · kcal', max: 1000 }, { key: 'protein', label: 'Proteine · g', max: 100 }, { key: 'carbs', label: 'Carboidrati · g', max: 100 }, { key: 'fat', label: 'Grassi · g', max: 100 }].map(metric => field(metric.label, h('input', { name: metric.key, type: 'number', required: true, min: 0, max: metric.max, step: '0.1', inputmode: 'decimal', value: food[metric.key] })))),
-    formError, h('div', { class: 'form-actions' }, h('button', { type: 'submit', class: 'button primary' }, 'Salva valori per 100 g'), data.foodOverrides[labelFoodId] && button('Ripristina i valori del catalogo', () => {
+    formError, h('div', { class: 'form-actions' }, h('button', { type: 'submit', class: 'button primary' }, `Salva valori per 100 ${food.unit}`), data.foodOverrides[labelFoodId] && button('Ripristina i valori del catalogo', () => {
       try { const next = clone(data); delete next.foodOverrides[labelFoodId]; persist(next); render(); if (!unsaved) notify('Ripristinati i valori del catalogo per i nuovi piani.'); } catch (error) { notify(error.message, true); }
     }, 'text-button')),
     h('p', { class: 'helper' }, 'I nuovi valori si usano nei piani creati da ora e nei pasti che modifichi. I pasti già pianificati mantengono i valori precedenti finché non scegli di aggiornarli. Per usare un intero vasetto modifica i grammi del pasto in base al peso in confezione.'));
@@ -982,11 +1014,11 @@ function renderFoods() {
       getFood(labelFoodId, next.foodOverrides); persist(next); render(); if (!unsaved) notify('Etichetta salvata per i nuovi piani.');
     } catch (error) { formError.textContent = error.message; }
   });
-  return h('div', { class: 'page foods-page' }, pageTitle('QUELLO CHE MANGI', 'Alimenti e quantità.', 'Pesi chiari e valori per 100 g. La confezione che hai in mano è il riferimento.'),
+  return h('div', { class: 'page foods-page' }, pageTitle('QUELLO CHE MANGI', 'Alimenti e quantità.', 'Valori per 100 g, oppure per 100 ml di latte. La confezione che hai in mano è il riferimento.'),
     h('section', { class: 'panel label-panel' }, h('div', { class: 'section-heading' }, h('div', {}, h('p', { class: 'eyebrow' }, 'IL RIFERIMENTO PER OGNI VARIANTE'), h('h2', {}, 'Etichette e valori nutrizionali'), h('p', {}, 'I valori delle varianti sono già inseriti. Puoi modificarli facoltativamente per una confezione diversa.'))), form),
     h('section', { class: 'panel refresh-panel' }, h('div', {}, h('h2', {}, 'Hai già pianificato i prossimi pasti?'), h('p', {}, 'Puoi aggiornarne i valori nutrizionali e le note di riferimento senza cambiare i grammi. I pasti mangiati, i giorni passati e le tue etichette personali restano invariati.')),
       button('Aggiorna i pasti da oggi in poi', refreshPlannedMeals, 'button secondary', { disabled: Boolean(storageReadError || storageConflict) })),
-    h('div', { class: 'section-heading' }, h('div', {}, h('h2', {}, 'Il catalogo del piano'), h('p', {}, 'Energia e macronutrienti per 100 g di parte edibile.'))),
+    h('div', { class: 'section-heading' }, h('div', {}, h('h2', {}, 'Il catalogo del piano'), h('p', {}, 'Energia e macronutrienti per 100 g di parte edibile; latte per 100 ml.'))),
     h('div', { class: 'food-catalog' }, ...FOODS.map(base => {
       const item = getFood(base.id, data.foodOverrides);
       return h('article', { class: 'food-card' }, h('div', { class: 'food-card-top' }, h('h3', {}, item.name), foodStatus(item)),
@@ -1009,6 +1041,8 @@ function renderMethod() {
       h('dl', { class: 'activity-factors' }, ...ACTIVITY_LEVELS.map(level => h('div', {}, h('dt', {}, level.label.split(' · ')[0]), h('dd', {}, `× ${level.factor.toLocaleString('it-IT', { maximumFractionDigits: 3 })}`)))),
       h('p', {}, 'Per mantenere il peso usiamo questa stima. Per perdere peso sottraiamo il deficit in kcal scelto nel profilo: puoi indicare anche 0. I profili precedenti conservano il vecchio deficit del 10% finché non salvi una scelta esplicita. Per aumentare il peso applichiamo il 5% in più. Il consumo totale è una media che include gli allenamenti, senza calorie aggiunte per corsa o sala attrezzi.')),
     h('section', { class: 'panel method-panel' }, h('h2', {}, 'Proteine, carboidrati e grassi'),
+      h('p', {}, 'In Profilo puoi scegliere direttamente calorie, proteine e grassi. I carboidrati sono il residuo: (kcal − 4 × proteine − 9 × grassi) / 4. Con 2.200 kcal, 144 g di proteine e 80 g di grassi, il riferimento è 226 g di carboidrati. Il piano con cioccolato produce invece circa 2.200 kcal, 144 g di proteine, 82 g di grassi e 221 g di carboidrati dalle porzioni e dalle etichette. Sono quantità indicative, non una garanzia di deficit di 500 kcal.'),
+      h('p', {}, 'Il piano con cioccolato propone la stessa colazione dopo corsa e pesi. Nei giorni di riposo puoi spostare la banana a colazione. Il cioccolato è una preferenza alimentare, senza un vantaggio specifico attribuito al recupero o alla sazietà. Le regole automatiche descritte sotto valgono quando non hai scelto obiettivi personali.'),
       h('p', {}, 'Le proteine partono da 1,6 g per kg di peso al giorno, oppure 1,8 g/kg durante il deficit. Sono valori orientativi entro l’intervallo descritto dalla ', source('posizione ISSN su proteine ed esercizio', 'https://doi.org/10.1186/s12970-017-0177-8'), ' per adulti sani che si allenano.'),
       h('p', {}, 'Il 30% dell’energia viene assegnato ai grassi; ai carboidrati va ciò che resta. Le proteine sono limitate al 35% dell’energia per lasciare spazio agli altri nutrienti: se questo limite si applica, vedrai un avviso.'),
       h('p', {}, 'Questa ripartizione è un punto di partenza dell’app. Le porzioni pratiche e gli alimenti scelti possono produrre totali diversi: nel diario trovi sempre i valori effettivi.')),

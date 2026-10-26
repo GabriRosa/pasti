@@ -1,6 +1,6 @@
-import { getFood, foodMacros } from './foods.js?v=20261023-google-health-sync';
-import { calculateTargets, sumMacros } from './nutrition.js?v=20261023-google-health-sync';
-import { trainingForDate } from './training.js?v=20261023-google-health-sync';
+import { getFood, foodMacros } from './foods.js?v=20261026-chocolate-plan';
+import { calculateTargets, sumMacros } from './nutrition.js?v=20261026-chocolate-plan';
+import { trainingForDate } from './training.js?v=20261026-chocolate-plan';
 
 export const MEAL_SLOTS = Object.freeze([
   { id: 'preworkout', label: 'Prima dell’allenamento · facoltativo' },
@@ -10,9 +10,9 @@ export const MEAL_SLOTS = Object.freeze([
 ].map(Object.freeze));
 
 const CARBS = ['pasta', 'rice', 'couscous', 'potatoes', 'lentil-pasta-lidl', 'lentil-pasta-lidl-fresh'];
-const PROTEINS = ['chicken', 'eggs', 'egg-whites', 'salmon', 'tuna', 'pork-tenderloin'];
+const PROTEINS = ['chicken', 'eggs', 'egg-whites', 'salmon', 'tuna', 'pork-tenderloin', 'turkey', 'cod'];
 const CARB_NAMES = { pasta: 'Pasta', rice: 'Riso', couscous: 'Couscous', potatoes: 'Patate', 'lentil-pasta-lidl': 'Sedanini di lenticchie secchi', 'lentil-pasta-lidl-fresh': 'Fusilli di lenticchie freschi' };
-const PROTEIN_NAMES = { chicken: 'pollo', eggs: 'uova', 'egg-whites': 'albumi', salmon: 'salmone', tuna: 'tonno', 'pork-tenderloin': 'filetto di maiale' };
+const PROTEIN_NAMES = { chicken: 'pollo', eggs: 'uova', 'egg-whites': 'albumi', salmon: 'salmone', tuna: 'tonno', 'pork-tenderloin': 'filetto di maiale', turkey: 'tacchino', cod: 'merluzzo' };
 const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
 const rotation = (value, length) => ((value % length) + length) % length;
 const ingredient = (foodId, grams) => ({ foodId, grams });
@@ -234,7 +234,7 @@ function mainMeal(base, wanted, carbId, proteinId, overrides, fixed = [ingredien
   if (amounts[2] > 1e-7) ingredients.push(ingredient('bread', amounts[2]));
   if (amounts[3] > 1e-7) ingredients.push(ingredient('olive-oil', amounts[3]));
   const cookMinutes = Math.max({ pasta: 20, rice: 25, couscous: 10, potatoes: 35, 'lentil-pasta-lidl': 20, 'lentil-pasta-lidl-fresh': 15 }[carbId],
-    { chicken: 20, eggs: 15, 'egg-whites': 10, salmon: 20, tuna: 5, 'pork-tenderloin': 25 }[proteinId]);
+    { chicken: 20, eggs: 15, 'egg-whites': 10, salmon: 20, tuna: 5, 'pork-tenderloin': 25, turkey: 20, cod: 20 }[proteinId]);
   const macros = sumMacros(ingredients.map(item => foodMacros(item.foodId, item.grams, overrides)));
   const deviations = ['protein', 'carbs', 'fat'].some(key => Math.abs(macros[key] - wanted[key]) > Math.max(4, wanted[key] * 0.12));
   let note = `${cookMinutes}–${cookMinutes + 5} minuti indicativi, preparazioni in parallelo. Pesi prima della cottura: pasta secca a secco, pasta fresca come da confezione; tonno sgocciolato. Verdure e tutto l’olio usato sono inclusi.`;
@@ -251,11 +251,60 @@ function mainMeal(base, wanted, carbId, proteinId, overrides, fixed = [ingredien
   return previewMeal(base.slot, `${CARB_NAMES[carbId]} con ${proteinName} e verdure`, ingredients, note, overrides, base);
 }
 
+// Fixed portions selected explicitly in the profile; their real totals stay visible.
+function chocolateBreakfast(base, overrides) {
+  return previewMeal('breakfast', 'Shaker, yogurt e cioccolato fondente', [
+    ingredient('skim-milk', 250), ingredient('whey', 30), ingredient('greek-yogurt-fage', 150),
+    ingredient('oats', 20), ingredient('chocolate-85', 30), ingredient('apple', 150),
+  ], 'Uno shaker al giorno: 30 g di polvere in 250 ml di latte scremato. Yogurt con avena e cioccolato, anche fuso; mela a parte. Stessa colazione dopo corsa o pesi. Nessuna frutta secca. Le quantità dipendono dalle etichette indicate.', overrides, base);
+}
+
+function chocolateBreakfastOptions(base, overrides) {
+  const reference = chocolateBreakfast(base, overrides);
+  const options = [reference];
+  for (const dairyId of ['protein-pudding-lidl', 'protein-pudding-lidl-vanilla', 'protein-mousse-lidl', 'protein-mousse-lidl-vanilla']) {
+    const fixed = reference.ingredients.filter(item => !['greek-yogurt-fage', 'oats'].includes(item.foodId));
+    const fixedMacros = sumMacros(fixed.map(item => foodMacros(item.foodId, item.grams, overrides)));
+    const dairy = getFood(dairyId, overrides); const oats = getFood('oats', overrides);
+    const kcal = reference.macros.kcal - fixedMacros.kcal;
+    const protein = reference.macros.protein - fixedMacros.protein;
+    const determinant = dairy.kcal * oats.protein - oats.kcal * dairy.protein;
+    if (Math.abs(determinant) < 1e-8) continue;
+    const dairyGrams = 100 * (kcal * oats.protein - oats.kcal * protein) / determinant;
+    const oatGrams = 100 * (dairy.kcal * protein - kcal * dairy.protein) / determinant;
+    if (dairyGrams <= 0 || dairyGrams > 500 || oatGrams < 0 || oatGrams > 150) continue;
+    options.push(previewMeal('breakfast', `Shaker e ${dairy.name}`, [...fixed, ingredient(dairyId, Math.round(dairyGrams / 5) * 5), ...(oatGrams > 0 ? [ingredient('oats', Math.max(5, Math.round(oatGrams / 5) * 5))] : [])],
+      `Uno shaker con 250 ml di latte scremato e 30 g di whey. Porzione di dessert adattata alle proteine e alle calorie della colazione base: il vasetto intero è da ${dairy.label.packGrams} g. Cioccolato e mela inclusi; conserva il resto del dessert secondo etichetta. Controlla i grassi e i carboidrati ricalcolati.`, overrides, base));
+  }
+  options.push(previewMeal('breakfast', 'Shaker, yogurt e fondente 70%', reference.ingredients.map(item => item.foodId === 'chocolate-85' ? ingredient('chocolate-70', item.grams) : item),
+    reference.note + ' Variante con 30 g di fondente 70%: calorie e macro leggermente diversi.', overrides, base));
+  return options;
+}
+
+function chocolateDayPlan(profile, dateKey, overrides) {
+  const session = trainingForDate(profile, dateKey);
+  const training = session.type !== 'rest';
+  const minutes = clockMinutes(session.time || profile.trainingTime || '06:00');
+  const base = (slot, time) => ({ id: `${dateKey}-${slot}`, slot, time });
+  const breakfast = chocolateBreakfast(base('breakfast', training && minutes < 540 ? clockTime(minutes + 60) : '08:00'), overrides);
+  breakfast.note += training ? ' Orario indicativo: mangia dopo la fine effettiva della seduta.' : ' Giorno di riposo: stessi alimenti e quantità.';
+  return [
+    previewMeal('preworkout', training ? 'Banana prima dell’allenamento' : 'Banana come spuntino', [ingredient('banana', 120)],
+      training ? '120 g senza buccia. Piccolo spuntino subito prima, secondo tolleranza; puoi anticiparlo o spostarlo alla colazione. Se lo salti, i totali pianificati diminuiscono.' : '120 g senza buccia. Puoi mangiarla insieme alla colazione: le calorie giornaliere restano uguali.', overrides, base('preworkout', training ? clockTime(minutes - 5) : '10:30')),
+    breakfast,
+    previewMeal('lunch', 'Pasta al pomodoro, pollo e zucchine', [ingredient('pasta', 90), ingredient('chicken', 120), ingredient('passata', 150), ingredient('vegetables', 250), ingredient('olive-oil', 30)],
+      'Pasta 90 g a secco; pollo 120 g a crudo; passata 150 g; zucchine 250 g a crudo. Olio EVO 30 g totali, compresa la cottura. Puoi scegliere le alternative con porzioni ricalcolate.', overrides, base('lunch', '13:00')),
+    previewMeal('dinner', 'Riso, merluzzo, zucchine e mela', [ingredient('rice', 65), ingredient('cod', 220), ingredient('vegetables', 250), ingredient('olive-oil', 30), ingredient('apple', 150)],
+      'Riso 65 g a secco; merluzzo 220 g a crudo al netto del ghiaccio; zucchine 250 g a crudo; mela 150 g edibili. Olio EVO 30 g totali, compresa la cottura.', overrides, base('dinner', '20:00')),
+  ];
+}
+
 export function createDayPlan(profile, targets, dateKey, overrides = {}) {
   calculateTargets(profile); // Validate the full profile even when targets are supplied.
   sumMacros([targets]);
   if (targets.kcal <= 0) throw new Error('L’obiettivo calorico deve essere maggiore di zero.');
   const number = dayNumber(dateKey);
+  if (profile.mealPlan === 'chocolate-2200') return chocolateDayPlan(profile, dateKey, overrides);
   const session = trainingForDate(profile, dateKey);
   const training = session.type !== 'rest';
   const trainingMinutes = clockMinutes(session.time || profile.trainingTime || '06:00');
@@ -312,6 +361,7 @@ export function mealAlternatives(meal, targets, overrides = {}) {
   const current = mealFromIngredients(meal, overrides);
   if (targets !== undefined) sumMacros([targets]);
   if (meal.slot === 'preworkout') return snackOptions(current, overrides);
+  if (meal.slot === 'breakfast' && current.ingredients.some(item => item.foodId === 'whey')) return chocolateBreakfastOptions(current, overrides);
   if (meal.slot === 'breakfast') return breakfastOptions(current.macros.kcal || targets?.kcal * 0.27 || 450, current, overrides);
   const fixed = current.ingredients.filter(item => !CARBS.includes(item.foodId) && !PROTEINS.includes(item.foodId) && !['olive-oil', 'bread'].includes(item.foodId));
   return CARBS.flatMap(carbId => PROTEINS.map(proteinId => mainMeal(current, current.macros, carbId, proteinId, overrides, fixed)));

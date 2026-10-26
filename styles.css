@@ -521,3 +521,9 @@ dialog::backdrop { background: #14251b77; backdrop-filter: blur(3px); }
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
+
+/* Personal nutrition settings share the existing profile controls. */
+.profile-form textarea { width: 100%; min-height: 7rem; padding: .8rem; border: 1px solid #cbd4ca; border-radius: 10px; font: inherit; resize: vertical; background: #fff; }
+.routine-notes { padding: 1rem 1.25rem; margin-bottom: 1rem; }
+.routine-notes summary { cursor: pointer; font-weight: 600; }
+.routine-notes p { line-height: 1.6; margin-bottom: 0; }

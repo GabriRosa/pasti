@@ -1,5 +1,5 @@
-import { calculateTargets } from './nutrition.js?v=20261023-google-health-sync';
-import { validateTrainingPlan, validateTrainingLog } from './training.js?v=20261023-google-health-sync';
+import { calculateTargets } from './nutrition.js?v=20261026-chocolate-plan';
+import { validateTrainingPlan, validateTrainingLog } from './training.js?v=20261026-chocolate-plan';
 
 /** Local-only, versioned persistence. All writes validate before replacing data. */
 export const STORAGE_KEY = 'pasti.data.v1';
@@ -49,7 +49,7 @@ function macros(value) {
   for (const key of MACRO_KEYS) number(value[key], 0, key === 'kcal' ? 100000 : 10000, key);
 }
 export function validateProfile(profile) {
-  keys(profile, ['age', 'sex', 'weight', 'height', 'activity', 'goal', 'trainingTime', 'trainingDays', 'specialCondition', 'deficitKcal', 'trainingPlan'], 'profilo');
+  keys(profile, ['age', 'sex', 'weight', 'height', 'activity', 'goal', 'trainingTime', 'trainingDays', 'specialCondition', 'deficitKcal', 'trainingPlan', 'nutritionTargets', 'mealPlan', 'routineNotes'], 'profilo');
   number(profile.age, 18, 100, 'età (18–100 anni).');
   number(profile.weight, 35, 250, 'peso (35–250 kg).');
   number(profile.height, 130, 230, 'altezza (130–230 cm).');
@@ -63,6 +63,9 @@ export function validateProfile(profile) {
   if (typeof profile.specialCondition !== 'boolean') fail('condizioni particolari.');
   if (Object.hasOwn(profile, 'deficitKcal')) {
     number(profile.deficitKcal, 0, Number.MAX_VALUE, 'deficit calorico.');
+    try { calculateTargets(profile); } catch (error) { fail(error.message); }
+  }
+  if (profile.nutritionTargets !== undefined || profile.mealPlan !== undefined || profile.routineNotes !== undefined) {
     try { calculateTargets(profile); } catch (error) { fail(error.message); }
   }
   try { validateTrainingPlan(profile.trainingPlan); } catch (error) { fail(error.message); }
