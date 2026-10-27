@@ -107,17 +107,20 @@ export function createGoogleHealthWorker({ fetchImpl = (...args) => fetch(...arg
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 15000);
     try {
-      const response = await fetchImpl(url, { ...init, redirect: 'error', signal: controller.signal });
+      const response = await fetchImpl(url, { ...init, redirect: 'manual', signal: controller.signal });
+      if (response.status >= 300 && response.status < 400) fail('INVALID_RESPONSE', 502);
       const data = await boundedJson(response, 16384);
       if (!response.ok) {
+        if (data.error === 'invalid_request' || data.error === 'unsupported_grant_type') fail('OAUTH_REQUEST_INVALID', 503);
+        if (data.error === 'invalid_client') fail('OAUTH_CLIENT_INVALID', 503);
         if (data.error === 'invalid_grant') fail('AUTH_REQUIRED', 401);
         if (response.status === 401) fail('AUTH_REQUIRED', 401);
         if (response.status === 403) fail('ACCESS_DENIED', 403);
         if (url === IDENTITY_ENDPOINT && response.status === 404) fail('ACCOUNT_NOT_LINKED', 403);
-        fail();
+        fail('GOOGLE_UPSTREAM_ERROR', 503);
       }
       return data;
-    } catch (error) { if (error?.code && error?.status) throw error; fail(); }
+    } catch (error) { if (error?.code && error?.status) throw error; fail('GOOGLE_NETWORK_ERROR', 503); }
     finally { clearTimeout(timer); }
   }
   const exchange = params => google(TOKEN_ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(params).toString() });
@@ -128,6 +131,7 @@ export function createGoogleHealthWorker({ fetchImpl = (...args) => fetch(...arg
       let origin;
       let callback = false;
       let claimedStateId = null;
+      let callbackStage = 'OAUTH_STATE_FAILED';
       try {
         origin = new URL(env.APP_ORIGIN).origin;
         if (origin !== env.APP_ORIGIN || !origin.startsWith('https://') || url.origin !== origin || !env.DB || !tokenValue(env.GOOGLE_CLIENT_ID) || !tokenValue(env.GOOGLE_CLIENT_SECRET)) fail();
@@ -190,13 +194,16 @@ export function createGoogleHealthWorker({ fetchImpl = (...args) => fetch(...arg
           if (url.searchParams.has('error')) fail('AUTH_CANCELLED', 400);
           const code = url.searchParams.get('code');
           if (!tokenValue(code) || url.searchParams.getAll('code').length !== 1) fail('AUTH_CANCELLED', 400);
+          callbackStage = 'TOKEN_EXCHANGE_FAILED';
           const reply = await exchange({ client_id: env.GOOGLE_CLIENT_ID, client_secret: env.GOOGLE_CLIENT_SECRET, code, code_verifier: flowData.verifier, grant_type: 'authorization_code', redirect_uri: `${origin}/api/health/callback` });
           // A new consent must actually issue offline access; never borrow a token from a different grant.
           const data = credentials(reply, flowData.nutrition, now());
+          callbackStage = 'IDENTITY_CHECK_FAILED';
           const identity = await google(IDENTITY_ENDPOINT, { headers: { Authorization: `Bearer ${data.access}` } });
           if (typeof identity.healthUserId !== 'string' || !/^[A-Za-z0-9-]{1,63}$/.test(identity.healthUserId)) fail('ACCOUNT_NOT_LINKED', 403);
           if (flowData.expectedUser && flowData.expectedUser !== identity.healthUserId) fail('ACCOUNT_CHANGED', 403);
           data.healthUserId = identity.healthUserId;
+          callbackStage = 'SESSION_SAVE_FAILED';
           const newToken = random(), newId = await hash(newToken);
           const encrypted = await box.seal(data, `session:${newId}`);
           // Detect logout/account change during Google network calls before saving a replacement session.
@@ -239,8 +246,9 @@ export function createGoogleHealthWorker({ fetchImpl = (...args) => fetch(...arg
         }
         return json({ access_token: data.access, expires_in: Math.max(0, Math.floor((data.expiry - now()) / 1000)), scope: data.scope, healthUserId: data.healthUserId }, 200, [cookie(SESSION_COOKIE, sessionToken, SESSION_SECONDS)]);
       } catch (error) {
-        const allowed = ['AUTH_REQUIRED', 'AUTH_CANCELLED', 'ACCESS_DENIED', 'ACCOUNT_CHANGED', 'ACCOUNT_NOT_LINKED', 'OFFLINE_ACCESS_REQUIRED', 'INVALID_RESPONSE'];
-        const code = allowed.includes(error?.code) ? error.code : 'UNAVAILABLE';
+        const allowed = ['AUTH_REQUIRED', 'AUTH_CANCELLED', 'ACCESS_DENIED', 'ACCOUNT_CHANGED', 'ACCOUNT_NOT_LINKED', 'OFFLINE_ACCESS_REQUIRED', 'INVALID_RESPONSE', 'OAUTH_CLIENT_INVALID', 'OAUTH_REQUEST_INVALID', 'GOOGLE_UPSTREAM_ERROR', 'GOOGLE_NETWORK_ERROR'];
+        let code = allowed.includes(error?.code) ? error.code : 'UNAVAILABLE';
+        if (callback && ['UNAVAILABLE', 'INVALID_RESPONSE'].includes(code)) code = callbackStage;
         if (claimedStateId) { try { await env.DB.prepare('DELETE FROM health_oauth_states WHERE id = ?').bind(claimedStateId).run(); } catch { /* The row remains unusable and expires after ten minutes. */ } }
         if (callback && origin) return redirect(origin, code, [cookie(FLOW_COOKIE, '', 0)]);
         return json({ error: code }, allowed.includes(error?.code) ? error.status : 503, code === 'AUTH_REQUIRED' ? [cookie(SESSION_COOKIE, '', 0)] : []);

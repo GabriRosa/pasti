@@ -6,6 +6,14 @@ export const GOOGLE_HEALTH_SCOPE = 'https://www.googleapis.com/auth/googlehealth
 export const GOOGLE_HEALTH_NUTRITION_SCOPE = 'https://www.googleapis.com/auth/googlehealth.nutrition.writeonly';
 const REFRESH_MS = 5 * 60 * 1000;
 const MESSAGES = {
+  OAUTH_REQUEST_INVALID: 'Google non ha accettato la richiesta di accesso di Pasti. Riprova il collegamento.',
+  GOOGLE_UPSTREAM_ERROR: 'Google non ha completato la richiesta di accesso. Riprova più tardi.',
+  GOOGLE_NETWORK_ERROR: 'Il servizio Pasti non riesce a raggiungere Google. Riprova più tardi.',
+  OAUTH_CLIENT_INVALID: 'Google non riconosce la configurazione di accesso di Pasti. Il gestore deve verificare il client Google.',
+  OAUTH_STATE_FAILED: 'Non è stato possibile verificare la richiesta di accesso. Riprova il collegamento.',
+  TOKEN_EXCHANGE_FAILED: 'Non è stato possibile completare lo scambio di autorizzazione con Google. Riprova il collegamento.',
+  IDENTITY_CHECK_FAILED: 'Non è stato possibile verificare il profilo Google Health. Riprova il collegamento.',
+  SESSION_SAVE_FAILED: 'Non è stato possibile salvare il collegamento sul servizio Pasti. Riprova il collegamento.',
   OFFLINE_ACCESS_REQUIRED: 'Google non ha rilasciato il permesso per mantenere l’accesso. Ricollega l’account e conferma l’autorizzazione.',
   DISCONNECT_FAILED: 'Impossibile confermare la disconnessione dal server. Riprova prima di lasciare questo dispositivo.',
   AUTH_REQUIRED: 'La sessione Google è scaduta. Ricollega il tuo account per continuare.',

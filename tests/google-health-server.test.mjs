@@ -31,7 +31,7 @@ function harness() {
   const replies = [];
   const worker = createGoogleHealthWorker({ now: () => time, fetchImpl: async (url, init) => {
     calls.push({ url, init });
-    assert.equal(init.redirect, 'error');
+    assert.equal(init.redirect, 'manual');
     assert.ok(init.signal instanceof AbortSignal);
     const reply = replies.shift();
     assert.ok(reply, `Unexpected Google request ${url}`);
@@ -149,7 +149,7 @@ test('revocation deletes unusable session, transient outage retains it for retry
     h.replies.push({ status: revoked ? 400 : 500, body: { error: revoked ? 'invalid_grant' : 'temporarily_unavailable' } });
     const res = await h.request('/api/health/session', { cookies: session });
     assert.equal(res.status, revoked ? 401 : 503);
-    assert.deepEqual(await res.json(), { error: revoked ? 'AUTH_REQUIRED' : 'UNAVAILABLE' });
+    assert.deepEqual(await res.json(), { error: revoked ? 'AUTH_REQUIRED' : 'GOOGLE_UPSTREAM_ERROR' });
     assert.equal(h.sqlite.prepare('SELECT count(*) AS n FROM health_sessions').get().n, revoked ? 0 : 1);
   }
 });
@@ -254,7 +254,7 @@ test('oversized or malformed Google replies and invalid configuration fail witho
     const flow = await h.start();
     h.replies.push(reply);
     const res = await h.request(`/api/health/callback?code=test&state=${flow.state}`, { method: 'GET', cookies: flow.flow });
-    assert.equal(res.headers.get('Location'), `${ORIGIN}/?health_error=INVALID_RESPONSE#today`);
+    assert.equal(res.headers.get('Location'), `${ORIGIN}/?health_error=TOKEN_EXCHANGE_FAILED#today`);
     assert.equal(h.sqlite.prepare('SELECT count(*) AS n FROM health_sessions').get().n, 0);
   }
   const h = harness();
@@ -316,4 +316,31 @@ test('callback lifetime starts after token response, not before the OAuth exchan
   const session = h.cookies(callback).split('; ').find(value => value.startsWith(`${cookieName}=`));
   const restored = await h.request('/api/health/session', { cookies: session });
   assert.equal((await restored.json()).expires_in, 3600);
+});
+
+
+test('callback diagnostics identify the failed stage without revealing upstream errors', async () => {
+  for (const [stage, replies] of [
+    ['OAUTH_CLIENT_INVALID', [{ status: 401, body: { error: 'invalid_client', error_description: 'private detail' } }]],
+    ['GOOGLE_UPSTREAM_ERROR', [null, { status: 500, body: { error: 'private detail' } }]],
+    ['GOOGLE_UPSTREAM_ERROR', [{ status: 500, body: { error: 'private detail' } }]],
+  ]) {
+    const h = harness();
+    const flow = await h.start();
+    h.replies.push(...replies.map(reply => reply ?? h.token()));
+    const res = await h.request(`/api/health/callback?code=test&state=${flow.state}`, { method: 'GET', cookies: flow.flow });
+    assert.equal(res.headers.get('Location'), `${ORIGIN}/?health_error=${stage}#today`);
+    assert.equal(h.sqlite.prepare('SELECT count(*) AS n FROM health_sessions').get().n, 0);
+  }
+});
+
+
+test('Google redirects are rejected without forwarding credentials or following the destination', async () => {
+  const h = harness();
+  const flow = await h.start();
+  h.replies.push(() => new Response(null, { status: 302, headers: { Location: 'https://other.example/' } }));
+  const res = await h.request(`/api/health/callback?code=test&state=${flow.state}`, { method: 'GET', cookies: flow.flow });
+  assert.equal(res.headers.get('Location'), `${ORIGIN}/?health_error=TOKEN_EXCHANGE_FAILED#today`);
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.sqlite.prepare('SELECT count(*) AS n FROM health_sessions').get().n, 0);
 });

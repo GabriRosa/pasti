@@ -33,7 +33,7 @@ export function createPersistentHealthClient({
       const code = url.searchParams.get('health_error');
       url.searchParams.delete('health_error');
       historyRef.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
-      return ['AUTH_REQUIRED', 'ACCESS_DENIED', 'ACCOUNT_NOT_LINKED', 'ACCOUNT_CHANGED', 'AUTH_CANCELLED', 'AUTH_TIMEOUT', 'OFFLINE_ACCESS_REQUIRED'].includes(code) ? code : 'UNAVAILABLE';
+      return ['AUTH_REQUIRED', 'ACCESS_DENIED', 'ACCOUNT_NOT_LINKED', 'ACCOUNT_CHANGED', 'AUTH_CANCELLED', 'AUTH_TIMEOUT', 'OFFLINE_ACCESS_REQUIRED', 'OAUTH_CLIENT_INVALID', 'OAUTH_REQUEST_INVALID', 'GOOGLE_UPSTREAM_ERROR', 'GOOGLE_NETWORK_ERROR', 'OAUTH_STATE_FAILED', 'TOKEN_EXCHANGE_FAILED', 'IDENTITY_CHECK_FAILED', 'SESSION_SAVE_FAILED'].includes(code) ? code : 'UNAVAILABLE';
     },
   };
 }

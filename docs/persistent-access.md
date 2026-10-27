@@ -2,7 +2,7 @@
 
 La versione Cloudflare di Pasti usa un servizio OAuth sullo stesso dominio del sito. Il browser conserva un cookie di sessione Secure, HttpOnly e SameSite=Lax. Il Worker conserva in D1 i token Google e l’identificativo Health cifrati con AES-GCM; l’identificativo del cookie è salvato sotto forma di hash. Le calorie e il diario non entrano in questo database.
 
-La versione è pubblicata su [Pasti con accesso mantenuto](https://pasti.gabri-rosso02.workers.dev/) dal 27 ottobre 2026, con Cloudflare Workers Free e D1 Free. Database, segreti e redirect Google sono configurati. L’app Google è in produzione, ma non ancora verificata da Google: il consenso mostra il relativo avviso. La verifica completa del primo accesso e del ripristino della sessione è in attesa del consenso personale. Sono verificati HTTPS, avvio OAuth e rifiuto delle richieste senza sessione o da origini diverse. Il repository su GitHub Pages mantiene `GOOGLE_HEALTH_PERSISTENT = false` e continua a usare l’accesso limitato alla pagina aperta. Il build Cloudflare abilita il collegamento persistente nella sola cartella generata `dist/`.
+La versione è pubblicata su [Pasti con accesso mantenuto](https://pasti.gabri-rosso02.workers.dev/) dal 27 ottobre 2026, con Cloudflare Workers Free e D1 Free. Database, segreti e redirect Google sono configurati. L’app Google è in produzione, ma non ancora verificata da Google: il consenso mostra il relativo avviso. Il primo tentativo reale non ha creato una sessione. È stata corretta la gestione delle richieste Google nel runtime Cloudflare: le chiamate usano redirect manuali e rifiutano le risposte 3xx senza seguirle. Una richiesta con codice sintetico non valido ora raggiunge Google e riceve il rifiuto atteso. Il nuovo consenso personale e il ripristino reale della sessione restano da verificare. Sono verificati HTTPS, avvio OAuth e rifiuto delle richieste senza sessione o da origini diverse. Il repository su GitHub Pages mantiene `GOOGLE_HEALTH_PERSISTENT = false` e continua a usare l’accesso limitato alla pagina aperta. Il build Cloudflare abilita il collegamento persistente nella sola cartella generata `dist/`.
 
 ## Sessione e rinnovo
 
@@ -44,7 +44,7 @@ Il nuovo dominio ha una memoria locale distinta. Prima del passaggio, esportare 
 
 ## Endpoint e controlli
 
-Tutti i POST richiedono l’header `X-Pasti-Request: 1` e `Origin` uguale a `APP_ORIGIN`. Il servizio non abilita CORS. L’avvio richiede anche JSON. Il callback è un GET con stato monouso, legato a un cookie di dieci minuti e a PKCE S256. Il rinnovo usa un lock D1; una disconnessione durante una richiesta impedisce di ricreare la sessione cancellata.
+Tutti i POST richiedono l’header `X-Pasti-Request: 1` e `Origin` uguale a `APP_ORIGIN`. Il servizio non abilita CORS. L’avvio richiede anche JSON. Gli errori di callback espongono soltanto codici fissi per distinguere configurazione, rete, identità e salvataggio; non espongono messaggi grezzi del fornitore o credenziali. Il callback è un GET con stato monouso, legato a un cookie di dieci minuti e a PKCE S256. Il rinnovo usa un lock D1; una disconnessione durante una richiesta impedisce di ricreare la sessione cancellata.
 
 | Metodo e percorso | Risultato |
 | --- | --- |

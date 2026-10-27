@@ -8,9 +8,9 @@ import { createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } fr
 import { trainingForDate, validateTrainingPlan, TRAINING_LOG_TYPES, validateTrainingLog, trainingLogLabel } from './src/training.js?v=20261027-neutral';
 import { parseActivityCsv, suggestActivityColumns, summarizeActivityCsv } from './src/activity-import.js?v=20261027-neutral';
 import { STORAGE_KEY, MAX_BACKUP_BYTES, createEmptyData, validateData, parseBackup, loadData, saveData, exportBackup, clearData } from './src/storage.js?v=20261027-barcode-quantities';
-import { createPersistentHealthClient } from './src/google-health-persistent.js?v=20261027-persistent';
-import { GOOGLE_HEALTH_CLIENT_ID, GOOGLE_HEALTH_PERSISTENT } from './src/google-health-config.js?v=20261027-persistent';
-import { createGoogleHealthSession } from './src/google-health-session.js?v=20261027-persistent';
+import { createPersistentHealthClient } from './src/google-health-persistent.js?v=20261027-persistent2';
+import { GOOGLE_HEALTH_CLIENT_ID, GOOGLE_HEALTH_PERSISTENT } from './src/google-health-config.js?v=20261027-persistent2';
+import { createGoogleHealthSession } from './src/google-health-session.js?v=20261027-persistent2';
 import { prepareGoogleHealthConsumedMeal } from './src/google-health-nutrition.js?v=20261027-neutral';
 
 const $ = selector => document.querySelector(selector);
