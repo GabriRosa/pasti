@@ -581,3 +581,24 @@ html { background: var(--bg); }
 .brand > svg { color: #303030; }
 .main-nav > a:hover, .button.secondary:hover, .icon-button:hover, .training-log-choice:not([aria-pressed="true"]):hover { background: var(--surface-hover); }
 input[type="checkbox"] { accent-color: var(--accent); }
+
+/* Free meal composition */
+.meal-food-picker { margin-top: 24px; padding: 20px; border: 1px solid var(--line); border-radius: 14px; background: var(--input); }
+.meal-food-picker h3 { font-size: 1.05rem; }
+.picker-results { max-height: 230px; overflow-y: auto; border-radius: 10px; }
+.picker-result { display: block; width: 100%; text-align: left; background: var(--paper); color: var(--ink); border: 1px solid var(--line); padding: 12px 14px; margin-bottom: 6px; border-radius: 9px; }
+.picker-result:hover { background: var(--surface-hover); }
+.picker-result strong, .picker-result small { display: block; }
+.picker-result strong { font-size: .82rem; }
+.picker-result small { margin-top: 4px; color: var(--ink-soft); font-size: .69rem; }
+.picker-editor:not(:empty) { margin-top: 14px; padding-top: 18px; border-top: 1px solid var(--line); }
+.picker-editor h4 { margin: 0 0 14px; }
+.picker-remember { display: flex; align-items: center; gap: 10px; font-size: .8rem; margin: 16px 0; }
+.edit-ingredient > div:first-child { min-width: 0; flex: 1; }
+.remove-ingredient { flex: none; font-size: .72rem; }
+@media (max-width: 600px) {
+  .meal-food-picker { padding: 14px; }
+  .edit-ingredient { flex-wrap: wrap; }
+  .edit-ingredient > div:first-child { flex-basis: calc(100% - 120px); }
+  .remove-ingredient { margin-left: auto; padding: 0; min-height: 32px; }
+}

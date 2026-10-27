@@ -2237,3 +2237,102 @@ test('opening a plan keeps the original schedule of meals already consumed', asy
   await bootApp(t, store);
   assert.deepEqual(loadData(store).data, initial);
 });
+
+function openComposer(document) {
+  document.querySelector('.meal-card .meal-actions button').click();
+}
+function composerButton(document, text) {
+  return document.querySelectorAll('#app-dialog button').find(item => item.textContent === text);
+}
+function fillComposer(document, selector, value) {
+  const input = document.querySelector(selector);
+  assert.ok(input, selector);
+  input.value = value; input.dispatch('input');
+  return input;
+}
+
+test('meal composer searches any catalog food, removes base ingredients and saves exact totals', async t => {
+  const key = todayKey(), initial = generatedDiary(key);
+  const store = new MemoryStorage(); saveData(initial, store);
+  const { document } = await bootApp(t, store);
+  openComposer(document);
+  while (document.querySelector('.remove-ingredient')) document.querySelector('.remove-ingredient').click();
+  composerButton(document, 'Salva questo pasto').click();
+  assert.equal(document.querySelector('#app-dialog').open, true);
+  fillComposer(document, '.meal-food-picker input[type="search"]', 'pollo');
+  assert.equal(document.querySelectorAll('.picker-result').length, 1);
+  document.querySelector('.picker-result').click();
+  fillComposer(document, '.picker-amount-form input', '175');
+  document.querySelector('.picker-amount-form').dispatch('submit');
+  fillComposer(document, '#app-dialog input[type="text"]', 'Il mio pasto');
+  assert.deepEqual(loadData(store).data, initial);
+  composerButton(document, 'Salva questo pasto').click();
+  const result = loadData(store).data.days[key].meals[0];
+  assert.equal(result.title, 'Il mio pasto');
+  assert.deepEqual(result.ingredients, [{ foodId: 'chicken', grams: 175 }]);
+  assertMacrosClose(result.macros, foodMacros('chicken', 175));
+  assert.equal(result.time, initial.days[key].meals[0].time);
+  assert.deepEqual(loadData(store).data.days[key].consumed, {});
+});
+
+test('meal composer saves manual foods and reusable portions together, including ml and missing-value validation', async t => {
+  const key = todayKey(), initial = generatedDiary(key);
+  const store = new MemoryStorage(); saveData(initial, store);
+  const { document } = await bootApp(t, store);
+  openComposer(document);
+  composerButton(document, 'Inserisci un alimento a mano').click();
+  fillComposer(document, '.picker-manual-form input', 'Bevanda personale');
+  const unit = document.querySelector('.picker-manual-form select'); unit.value = 'ml'; unit.dispatch('change');
+  for (const [metric, value] of Object.entries({ kcal: 45, protein: 3, carbs: 5, fat: 1.5 })) {
+    fillComposer(document, `input[data-metric="${metric}"]`, String(value));
+  }
+  const inputs = document.querySelectorAll('.picker-manual-form input[type="number"]');
+  inputs.at(-1).value = '250'; inputs.at(-1).dispatch('input');
+  fillComposer(document, 'input[data-metric="fat"]', '');
+  document.querySelector('.picker-manual-form').dispatch('submit');
+  assert.equal(document.querySelectorAll('.edit-ingredient').length, initial.days[key].meals[0].ingredients.length);
+  fillComposer(document, 'input[data-metric="fat"]', '1.5');
+  document.querySelector('.picker-manual-form').dispatch('submit');
+  assert.equal(loadData(store).data.personalPortions, undefined);
+  composerButton(document, 'Salva questo pasto').click();
+  const result = loadData(store).data;
+  assert.equal(result.personalPortions.length, 1);
+  const ingredient = result.days[key].meals[0].ingredients.at(-1);
+  assert.equal(ingredient.grams, 250);
+  assert.equal(ingredient.foodSnapshot.unit, 'ml');
+  assert.equal(ingredient.foodSnapshot.name, 'Bevanda personale');
+  assert.deepEqual(result.personalPortions[0].food, ingredient.foodSnapshot);
+  assertMacrosClose(result.days[key].meals[0].macros, sumMacros([initial.days[key].meals[0].macros, { kcal:112.5, protein:7.5, carbs:12.5, fat:3.75 }]));
+  assert.deepEqual(parseBackup(exportBackup(result)), result);
+  openComposer(document);
+  fillComposer(document, '.meal-food-picker input[type="search"]', 'bevanda personale');
+  assert.equal(document.querySelectorAll('.picker-result').length, 1);
+});
+
+test('cancelling a free meal composition never saves pending personal foods', async t => {
+  const key = todayKey(), initial = generatedDiary(key);
+  const store = new MemoryStorage(); saveData(initial, store);
+  const { document } = await bootApp(t, store);
+  openComposer(document);
+  composerButton(document, 'Inserisci un alimento a mano').click();
+  fillComposer(document, '.picker-manual-form input', 'Prova');
+  for (const metric of ['kcal', 'protein', 'carbs', 'fat']) fillComposer(document, `input[data-metric="${metric}"]`, '0');
+  document.querySelector('.picker-manual-form').dispatch('submit');
+  assert.equal(document.querySelectorAll('.edit-ingredient').length, initial.days[key].meals[0].ingredients.length + 1);
+  composerButton(document, 'Annulla').click();
+  assert.deepEqual(loadData(store).data, initial);
+});
+
+test('invalid ingredient quantities cannot be erased by adding another ingredient', async t => {
+  const key = todayKey(), initial = generatedDiary(key);
+  const store = new MemoryStorage(); saveData(initial, store);
+  const { document } = await bootApp(t, store);
+  openComposer(document);
+  fillComposer(document, '.edit-ingredients input', '');
+  fillComposer(document, '.meal-food-picker input[type="search"]', 'pollo');
+  document.querySelector('.picker-result').click();
+  document.querySelector('.picker-amount-form').dispatch('submit');
+  composerButton(document, 'Salva questo pasto').click();
+  assert.equal(document.querySelector('#app-dialog').open, true);
+  assert.deepEqual(loadData(store).data, initial);
+});

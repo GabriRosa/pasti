@@ -1,3 +1,4 @@
+import { createMealFoodPicker } from './src/meal-food-picker.js?v=20261027-composer';
 import { MACRO_CHART_KEYS, macroGrams, macroChartSvg } from './src/macro-chart.js?v=20261027-neutral';
 import { renderPortions } from './src/portions-ui.js?v=20261027-neutral';
 import { ACTIVITY_LEVELS, calculateTargets, sumMacros } from './src/nutrition.js?v=20261027-neutral';
@@ -109,7 +110,7 @@ function updateDay(action) {
   try {
     const next = clone(data);
     const day = next.days[selectedDate];
-    action(day);
+    action(day, next);
     day.updatedAt = new Date().toISOString();
     persist(next);
     render();
@@ -608,6 +609,8 @@ function dialogHeading(title, subtitle) {
 
 function editMeal(original) {
   let draft = clone(original);
+  const pendingPortions = [];
+  const titleInput = h('input', { type: 'text', required: true, maxlength: 300, value: draft.title, oninput: event => { draft.title = event.target.value; } });
   const container = h('div', { class: 'dialog-content' });
   const values = h('div', { class: 'edit-macro-total', 'aria-live': 'polite' });
   const ingredientFields = h('div', { class: 'edit-ingredients' });
@@ -633,9 +636,10 @@ function editMeal(original) {
       draft = mealFromIngredients(draft, data.foodOverrides);
       values.replaceChildren(h('strong', {}, `${round(draft.macros.kcal)} kcal`), h('span', {}, `Proteine ${round(draft.macros.protein)} g`), h('span', {}, `Carboidrati ${round(draft.macros.carbs)} g`), h('span', {}, `Grassi ${round(draft.macros.fat)} g`));
       errors.textContent = '';
-    } catch (error) { errors.textContent = error.message; }
+    } catch (error) { values.replaceChildren(); errors.textContent = error.message; }
   };
   const rebuild = () => {
+    titleInput.value = draft.title;
     controls.replaceChildren();
     if (['lunch', 'dinner'].includes(draft.slot)) {
       for (const [label, ids] of [['Carboidrato', CARBS], ['Proteina', PROTEINS]]) {
@@ -651,35 +655,56 @@ function editMeal(original) {
     }
     ingredientFields.replaceChildren(...draft.ingredients.map((ingredient, index) => {
       const food = getIngredientFood(ingredient, data.foodOverrides);
-      const grams = h('input', { id: `ingredient-${index}`, type: 'number', min: '0', max: '3000', step: '0.1', inputmode: 'decimal', value: Number(ingredient.grams.toFixed(1)), 'aria-label': `${food.name}, ${food.unit === 'ml' ? 'millilitri' : 'grammi'}`, oninput: event => {
+      const grams = h('input', { id: `ingredient-${index}`, type: 'number', min: '0', max: '3000', step: '0.1', inputmode: 'decimal', value: Number.isFinite(ingredient.grams) ? Number(ingredient.grams.toFixed(1)) : '', 'aria-label': `${food.name}, ${food.unit === 'ml' ? 'millilitri' : 'grammi'}`, oninput: event => {
         adaptation.hidden = true;
         adaptation.replaceChildren();
         const value = event.target.valueAsNumber;
-        if (!Number.isFinite(value) || value < 0 || value > 3000) { errors.textContent = 'Inserisci una quantità tra 0 e 3.000 g.'; return; }
         draft.ingredients[index].grams = value;
+        if (!Number.isFinite(value) || value < 0 || value > 3000) { values.replaceChildren(); errors.textContent = `Inserisci una quantità tra 0 e 3.000 ${food.unit}.`; return; }
         updateTotals();
       } });
-      return h('div', { class: 'edit-ingredient' }, h('div', {}, h('label', { for: `ingredient-${index}` }, food.name), h('small', {}, food.unitNote)), h('div', { class: 'gram-control' }, grams, h('span', {}, food.unit)), ingredient.foodSnapshot && button('Rimuovi', () => { draft.ingredients.splice(index, 1); rebuild(); }, 'text-button'));
+      return h('div', { class: 'edit-ingredient' }, h('div', {}, h('label', { for: `ingredient-${index}` }, food.name), h('small', {}, food.unitNote)), h('div', { class: 'gram-control' }, grams, h('span', {}, food.unit)), button('Rimuovi', () => { draft.ingredients.splice(index, 1); adaptation.hidden = true; rebuild(); }, 'text-button remove-ingredient', { 'aria-label': `Rimuovi ${food.name}` }));
     }));
     updateTotals();
   };
-  const variantSelect = h('select', { autofocus: true, 'aria-label': 'Scegli un’alternativa completa', onchange: event => {
+  const picker = createMealFoodPicker({ h, field, button,
+    getFoods: () => [
+      ...[...(data.personalPortions || []), ...pendingPortions].map(portion => ({ ...portion, personal: true })),
+      ...FOODS.map(food => ({ id: food.id, food: getFood(food.id, data.foodOverrides) })),
+    ],
+    add: (ingredient, portion) => {
+      if (draft.ingredients.length >= 30) throw new Error('Puoi inserire al massimo 30 ingredienti nel pasto.');
+      if (portion && (data.personalPortions || []).length + pendingPortions.length >= 200) throw new Error('Hai raggiunto 200 porzioni personali. Puoi aggiungere l’alimento senza salvarlo tra le porzioni.');
+      draft.ingredients.push(clone(ingredient));
+      if (portion) pendingPortions.push(clone(portion));
+      adaptation.hidden = true;
+      rebuild();
+    },
+  });
+  const variantSelect = h('select', { 'aria-label': 'Scegli un’alternativa completa', onchange: event => {
     if (event.target.value === '') return;
     const index = Number(event.target.value);
     const choice = index === -1 ? original : alternatives[index];
     if (choice) { const before = clone(draft); draft = clone(choice); draft.id = original.id; draft.slot = original.slot; draft.time = original.time; rebuild(); showAdaptation(before); }
   } }, h('option', { value: '' }, 'Scegli un’alternativa…'), h('option', { value: '-1' }, 'Pasto originale'), ...alternatives.map((meal, index) => h('option', { value: index }, meal.title)));
-  container.append(dialogHeading('Fai spazio alle tue scelte', 'Le dosi ricalcolano energia e macronutrienti.'), field('Alternative del pasto', variantSelect, original.slot === 'breakfast' ? 'Tra le colazioni: budino proteico, mousse proteica e yogurt greco con cioccolato.' : null), controls,
+  container.append(dialogHeading('Componi il tuo pasto', 'Aggiungi alimenti, scegli le quantità e controlla i macro.'), field('Nome del pasto', titleInput), field('Alternative del pasto', variantSelect, original.slot === 'breakfast' ? 'Tra le colazioni: budino proteico, mousse proteica e yogurt greco con cioccolato.' : null), controls,
     ['lunch', 'dinner'].includes(original.slot) ? h('p', { class: 'swap-explanation' }, 'Cambiando alimento si adattano anche la porzione di carne, pesce o uova e l’olio. Le proteine di pasta e legumi sono già conteggiate.') : document.createDocumentFragment(),
-    adaptation, ingredientFields,
+    adaptation, ingredientFields, picker,
     h('p', { class: 'helper' }, 'Pesi della parte edibile: crudo o secco, salvo la nota dell’alimento. Per uova e albumi usa i grammi effettivi.'), values, errors,
     h('div', { class: 'dialog-actions' }, button('Annulla', closeDialog), button('Salva questo pasto', () => {
-      if (errors.textContent) return;
+      if (!draft.ingredients.length) { errors.textContent = 'Aggiungi almeno un ingrediente al pasto.'; return; }
+      if (!titleInput.value.trim() || !titleInput.checkValidity()) { errors.textContent = 'Inserisci un nome per il pasto, fino a 300 caratteri.'; titleInput.focus(); return; }
       const invalid = [...ingredientFields.querySelectorAll('input')].some(input => !input.checkValidity() || input.value === '');
       if (invalid) { errors.textContent = 'Controlla i grammi di tutti gli ingredienti.'; return; }
       try {
         draft = mealFromIngredients(draft, data.foodOverrides);
-        if (updateDay(day => { day.meals = day.meals.map(meal => meal.id === original.id ? clone(draft) : meal); })) {
+        draft.title = titleInput.value.trim();
+        if (updateDay((day, next) => {
+          if (day.consumed[original.id]) throw new Error('Questo pasto è già stato registrato.');
+          day.meals = day.meals.map(meal => meal.id === original.id ? clone(draft) : meal);
+          const retained = pendingPortions.filter(portion => draft.ingredients.some(item => item.foodId === portion.id));
+          if (retained.length) next.personalPortions = [...(next.personalPortions || []), ...retained];
+        })) {
           closeDialog(); notify(unsaved ? 'Pasto aggiornato in memoria. Scarica il backup: il salvataggio è bloccato.' : 'Pasto aggiornato.');
         }
       } catch (error) { errors.textContent = error.message; }
