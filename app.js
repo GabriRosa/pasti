@@ -2,7 +2,7 @@ import { MACRO_CHART_KEYS, macroGrams, macroChartSvg } from './src/macro-chart.j
 import { renderPortions } from './src/portions-ui.js?v=20261027-neutral';
 import { ACTIVITY_LEVELS, calculateTargets, sumMacros } from './src/nutrition.js?v=20261027-neutral';
 import { FOODS, LIDL_FOOD_IDS, getFood, getIngredientFood, ingredientMacros } from './src/foods.js?v=20261027-neutral';
-import { createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } from './src/planner.js?v=20261027-neutral';
+import { createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } from './src/planner.js?v=20261027-meal-times';
 import { trainingForDate, validateTrainingPlan, TRAINING_LOG_TYPES, validateTrainingLog, trainingLogLabel } from './src/training.js?v=20261027-neutral';
 import { parseActivityCsv, suggestActivityColumns, summarizeActivityCsv } from './src/activity-import.js?v=20261027-neutral';
 import { STORAGE_KEY, MAX_BACKUP_BYTES, createEmptyData, validateData, parseBackup, loadData, saveData, exportBackup, clearData } from './src/storage.js?v=20261027-neutral';
@@ -86,6 +86,21 @@ function getDay() {
       consumed: {}, skipped: [],
     };
     persist(next);
+  }
+  const current = data.days[selectedDate];
+  if (selectedDate >= localDate() && !storageReadError && !storageConflict) {
+    const session = trainingForDate(current.profileSnapshot, selectedDate);
+    const plannedTime = meal => meal.slot === 'dinner' ? '19:30'
+      : meal.slot === 'preworkout' && session.type !== 'rest' ? session.time : meal.time;
+    const changes = current.meals.filter(meal => !current.consumed[meal.id] && meal.time !== plannedTime(meal));
+    if (changes.length) {
+      const next = clone(data);
+      for (const meal of next.days[selectedDate].meals) {
+        if (!current.consumed[meal.id]) meal.time = plannedTime(meal);
+      }
+      next.days[selectedDate].updatedAt = new Date().toISOString();
+      persist(next);
+    }
   }
   return data.days[selectedDate];
 }

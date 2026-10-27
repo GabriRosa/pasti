@@ -2202,3 +2202,38 @@ test('personal product can be saved, added, consumed and deleted without changin
   assert.equal(final.personalPortions.length, 0); assert.deepEqual(final.days[key].consumed[lunch.id], consumed);
   assert.deepEqual(parseBackup(exportBackup(final)), final);
 });
+
+test('opening a saved plan updates upcoming meal times without changing food or recorded history', async t => {
+  const key = todayKey();
+  const pastKey = dateOffset(key, -1);
+  const initial = generatedDiary(key);
+  initial.days[pastKey] = generatedDiary(pastKey).days[pastKey];
+  for (const current of Object.values(initial.days)) {
+    current.meals.find(item => item.slot === 'preworkout').time = '05:45';
+    current.meals.find(item => item.slot === 'dinner').time = '20:00';
+  }
+  const breakfast = initial.days[key].meals.find(item => item.slot === 'breakfast');
+  initial.days[key].consumed[breakfast.id] = { consumedAt: new Date().toISOString(), meal: clone(breakfast) };
+  const store = new MemoryStorage(); saveData(initial, store);
+  await bootApp(t, store);
+  const result = loadData(store).data;
+  const expected = clone(initial.days[key]);
+  expected.meals.find(item => item.slot === 'preworkout').time = '06:00';
+  expected.meals.find(item => item.slot === 'dinner').time = '19:30';
+  expected.updatedAt = result.days[key].updatedAt;
+  assert.deepEqual(result.days[key], expected);
+  assert.deepEqual(result.days[pastKey], initial.days[pastKey]);
+});
+
+test('opening a plan keeps the original schedule of meals already consumed', async t => {
+  const key = todayKey();
+  const initial = generatedDiary(key);
+  for (const item of initial.days[key].meals) {
+    if (item.slot === 'preworkout') item.time = '05:45';
+    if (item.slot === 'dinner') item.time = '20:00';
+    initial.days[key].consumed[item.id] = { consumedAt: new Date().toISOString(), meal: clone(item) };
+  }
+  const store = new MemoryStorage(); saveData(initial, store);
+  await bootApp(t, store);
+  assert.deepEqual(loadData(store).data, initial);
+});

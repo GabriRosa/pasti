@@ -139,8 +139,9 @@ test('06:00 training has a tiny optional preworkout then breakfast at 07:30', ()
   const targets = calculateTargets(profile);
   const training = createDayPlan(profile, targets, '2026-10-23');
   assert.deepEqual(training.map(meal => meal.slot), ['preworkout', 'breakfast', 'lunch', 'dinner']);
-  assert.equal(training[0].time, '05:45');
+  assert.equal(training[0].time, '06:00');
   assert.equal(training[1].time, '07:30');
+  assert.equal(training.at(-1).time, '19:30');
   assert.ok(training[0].macros.kcal < 120);
   assert.ok(training[0].macros.fat < 2);
   assert.ok(training[0].ingredients.every(item => !['protein-pudding-lidl', 'protein-mousse-lidl', 'greek-yogurt'].includes(item.foodId)));
@@ -160,8 +161,8 @@ test('dates are validated without UTC/local weekday shifts, including Sunday and
   }
   for (const date of ['2026-02-29', '2026-04-31', '2026-13-01', '2026-1-01', 'invalid', '1800-01-01']) assert.throws(() => createDayPlan(profile, calculateTargets(profile), date));
   const midnight = createDayPlan({ ...profile, trainingTime: '00:10' }, calculateTargets(profile), '2026-10-23');
-  assert.equal(midnight[0].time, '23:55');
-  assert.match(midnight[0].note, /sera precedente/);
+  assert.equal(midnight[0].time, '00:10');
+  assert.doesNotMatch(midnight[0].note, /sera precedente/);
 });
 
 test('at least three practical breakfast and preworkout alternatives include all user preferences', () => {
@@ -464,7 +465,7 @@ test('running and strength have identical targets and meal macros with no extra 
     const strengthPlan = createDayPlan(strength, targets, date);
     assert.deepEqual(runPlan, strengthPlan);
     assert.deepEqual(runPlan.map(meal => meal.slot), ['preworkout', 'breakfast', 'lunch', 'dinner']);
-    assert.equal(runPlan[0].time, '05:45');
+    assert.equal(runPlan[0].time, '06:00');
     assert.equal(runPlan[1].time, '07:30');
     assert.ok(runPlan.every(meal => !/palestra/i.test(meal.note)));
     runPlan.forEach(meal => checkMeal(meal));

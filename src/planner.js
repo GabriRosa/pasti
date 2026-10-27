@@ -290,12 +290,12 @@ function chocolateDayPlan(profile, dateKey, overrides) {
   breakfast.note += training ? ' Orario indicativo: mangia dopo la fine effettiva della seduta.' : ' Giorno di riposo: stessi alimenti e quantità.';
   return [
     previewMeal('preworkout', training ? 'Banana prima dell’allenamento' : 'Banana come spuntino', [ingredient('banana', 120)],
-      training ? '120 g senza buccia. Piccolo spuntino subito prima, secondo tolleranza; puoi anticiparlo o spostarlo alla colazione. Se lo salti, i totali pianificati diminuiscono.' : '120 g senza buccia. Puoi mangiarla insieme alla colazione: le calorie giornaliere restano uguali.', overrides, base('preworkout', training ? clockTime(minutes - 5) : '10:30')),
+      training ? '120 g senza buccia. Piccolo spuntino subito prima, secondo tolleranza; puoi anticiparlo o spostarlo alla colazione. Se lo salti, i totali pianificati diminuiscono.' : '120 g senza buccia. Puoi mangiarla insieme alla colazione: le calorie giornaliere restano uguali.', overrides, base('preworkout', training ? clockTime(minutes) : '10:30')),
     breakfast,
     previewMeal('lunch', 'Pasta al pomodoro, pollo e zucchine', [ingredient('pasta', 90), ingredient('chicken', 120), ingredient('passata', 150), ingredient('vegetables', 250), ingredient('olive-oil', 30)],
       'Pasta 90 g a secco; pollo 120 g a crudo; passata 150 g; zucchine 250 g a crudo. Olio EVO 30 g totali, compresa la cottura. Puoi scegliere le alternative con porzioni ricalcolate.', overrides, base('lunch', '13:00')),
     previewMeal('dinner', 'Riso, merluzzo, zucchine e mela', [ingredient('rice', 65), ingredient('cod', 220), ingredient('vegetables', 250), ingredient('olive-oil', 30), ingredient('apple', 150)],
-      'Riso 65 g a secco; merluzzo 220 g a crudo al netto del ghiaccio; zucchine 250 g a crudo; mela 150 g edibili. Olio EVO 30 g totali, compresa la cottura.', overrides, base('dinner', '20:00')),
+      'Riso 65 g a secco; merluzzo 220 g a crudo al netto del ghiaccio; zucchine 250 g a crudo; mela 150 g edibili. Olio EVO 30 g totali, compresa la cottura.', overrides, base('dinner', '19:30')),
   ];
 }
 
@@ -309,11 +309,10 @@ export function createDayPlan(profile, targets, dateKey, overrides = {}) {
   const training = session.type !== 'rest';
   const trainingMinutes = clockMinutes(session.time || profile.trainingTime || '06:00');
   const meals = [];
-  const base = slot => ({ id: `${dateKey}-${slot}`, slot, time: slot === 'lunch' ? '13:00' : slot === 'dinner' ? '20:00' : '08:00' });
+  const base = slot => ({ id: `${dateKey}-${slot}`, slot, time: slot === 'lunch' ? '13:00' : slot === 'dinner' ? '19:30' : '08:00' });
   if (training && profile.includePreworkout !== false) {
-    const snackBase = { ...base('preworkout'), time: clockTime(trainingMinutes - 15) };
+    const snackBase = { ...base('preworkout'), time: clockTime(trainingMinutes) };
     const snack = snackOptions(snackBase, overrides)[rotation(number, 3)];
-    if (trainingMinutes < 15) snack.note += ' L’orario dello spuntino cade la sera precedente.';
     meals.push(snack);
   }
   const breakfastBase = { ...base('breakfast'), time: training && trainingMinutes < 9 * 60 ? clockTime(trainingMinutes + 90) : '08:00' };
