@@ -1,9 +1,11 @@
 import { quantitySpec, toDisplayAmount, toStoredAmount } from './food-measures.js?v=20261027-oil';
 import { validatePersonalFood, normalizeBarcode, lookupProduct, createBarcodeScanner } from './barcode.js?v=20261027-neutral';
+import { searchFoods } from './food-search.js?v=20261027-food-search';
 
 // The picker only edits the meal draft. Persistence belongs to Save meal.
 export function createMealFoodPicker({ h, field, button, getFoods, add, getUsualQuantity = (_id, _food, fallback) => fallback, allowRemember = true, context = 'meal' }) {
   let disposed = false, request, generation = 0, mode = 'search';
+  let online = { query: '', items: [], page: 0, hasMore: false, loading: false, failure: null };
   const root = h('section', { class: 'meal-food-picker', 'aria-label': 'Aggiungi ingredienti' });
   const chooser = h('div', { class: 'picker-chooser', hidden: true });
   const launcher = button('Aggiungi alimento', () => open(), 'button secondary', { 'aria-expanded': 'false' });
@@ -13,7 +15,11 @@ export function createMealFoodPicker({ h, field, button, getFoods, add, getUsual
   const fmt = value => value.toLocaleString('it-IT', { maximumFractionDigits: 1 });
   const macros = (food, amount) => `${fmt(food.kcal * amount / 100)} kcal · P ${fmt(food.protein * amount / 100)} g · C ${fmt(food.carbs * amount / 100)} g · G ${fmt(food.fat * amount / 100)} g`;
   const normalize = text => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-  const search = h('input', { type: 'search', placeholder: 'Es. pollo, riso, yogurt…', 'aria-label': 'Cerca un alimento', oninput: () => { stopPending(); renderResults(); } });
+  const search = h('input', { type: 'search', placeholder: 'Es. pollo, riso, yogurt…', 'aria-label': 'Cerca un alimento', oninput: () => { stopPending(); resetOnline(); renderResults(); } });
+  const onlineButton = h('button', { type: 'submit', class: 'button secondary' }, 'Cerca online');
+  const onlineActions = h('div', { class: 'form-actions picker-online-actions' });
+  const searchForm = h('form', { class: 'picker-search-form', onsubmit: event => { event.preventDefault(); void searchOnline(); } },
+    field('Cerca nel catalogo e nelle tue porzioni', search), onlineButton);
   const video = h('video', { playsinline: true, muted: true, autoplay: true, class: 'barcode-video' });
   video.muted = true;
   const camera = h('div', { hidden: true, class: 'picker-camera' }, video,
@@ -26,7 +32,10 @@ export function createMealFoodPicker({ h, field, button, getFoods, add, getUsual
   const codeButton = h('button', { type: 'submit', class: 'button secondary' }, 'Cerca codice');
   const barcodeForm = h('form', { class: 'barcode-search picker-barcode-form', onsubmit: event => { event.preventDefault(); void findBarcode(codeInput.value); } },
     field('Codice a barre', codeInput), codeButton);
-  const searchPanel = h('div', { class: 'picker-search-panel' }, field('Cerca nel catalogo e nelle tue porzioni', search), results);
+  const searchPanel = h('div', { class: 'picker-search-panel' }, searchForm,
+    h('p', { class: 'helper' }, 'Ricerca online: ', h('a', { href: 'https://world.openfoodfacts.org', target: '_blank', rel: 'noopener noreferrer' }, 'Open Food Facts'), ' · ',
+      h('a', { href: 'https://opendatacommons.org/licenses/odbl/1-0/', target: '_blank', rel: 'noopener noreferrer' }, 'ODbL'), '. La ricerca invia solo il testo a Open Food Facts tramite Pasti.'),
+    results, onlineActions);
   const barcodePanel = h('div', { class: 'picker-barcode', hidden: true },
     button('Inquadra codice a barre', () => { stopPending(); editor.replaceChildren(); camera.hidden = false; status.textContent = 'Inquadra il codice del prodotto.'; void scanner.start(); }, 'button secondary'),
     camera, barcodeForm,
@@ -43,7 +52,9 @@ export function createMealFoodPicker({ h, field, button, getFoods, add, getUsual
   }
   function chooseMode(nextMode) {
     if (disposed) return;
-    stopPending(); mode = nextMode; editor.replaceChildren();
+    stopPending();
+    if (nextMode !== mode) resetOnline();
+    mode = nextMode; editor.replaceChildren();
     modes.hidden = false; back.hidden = true; status.textContent = '';
     searchPanel.hidden = mode !== 'search'; barcodePanel.hidden = mode !== 'barcode';
     modeButtons.forEach((control, index) => control.setAttribute('aria-pressed', ['search', 'barcode', 'manual'][index] === mode ? 'true' : 'false'));
@@ -57,14 +68,68 @@ export function createMealFoodPicker({ h, field, button, getFoods, add, getUsual
     root.setAttribute('data-open', 'true'); chooseMode('search');
   }
   function close(message = '', focus = true) {
-    stopPending(); editor.replaceChildren(); results.replaceChildren(); search.value = ''; codeInput.value = '';
+    stopPending(); resetOnline(); editor.replaceChildren(); results.replaceChildren(); search.value = ''; codeInput.value = '';
     chooser.hidden = true; launcher.hidden = false; launcher.setAttribute('aria-expanded', 'false');
     root.setAttribute('data-open', 'false'); status.textContent = message;
     if (focus && !disposed) launcher.focus();
   }
   function stopPending() {
     generation++; request?.abort(); request = null;
-    scanner.stop(); camera.hidden = true; codeButton.disabled = false;
+    scanner.stop(); camera.hidden = true; codeButton.disabled = false; onlineButton.disabled = false; online.loading = false;
+    onlineActions.querySelectorAll('button').forEach(control => { control.disabled = false; });
+  }
+  function resetOnline() {
+    online = { query: '', items: [], page: 0, hasMore: false, loading: false, failure: null };
+    onlineActions.replaceChildren();
+  }
+  async function searchOnline(page = 1) {
+    if (disposed) return;
+    const query = search.value.trim();
+    stopPending();
+    if (!query) { resetOnline(); renderResults(); search.focus(); return; }
+    if (page === 1 || online.query !== query) online = { query, items: [], page: 0, hasMore: false, loading: false, failure: null };
+    const current = generation;
+    request = new AbortController(); online.loading = true; online.failure = null; onlineButton.disabled = true;
+    renderResults();
+    try {
+      const response = await searchFoods(query, { page, signal: request.signal });
+      if (disposed || current !== generation) return;
+      const seen = new Set(online.items.map(item => item.barcode));
+      online.items.push(...response.items.filter(item => !seen.has(item.barcode) && seen.add(item.barcode)));
+      online.page = response.page; online.hasMore = response.hasMore;
+    } catch (error) {
+      if (disposed || current !== generation) return;
+      online.failure = { message: error.message, retry: () => searchOnline(page) };
+    } finally {
+      if (!disposed && current === generation) { request = null; online.loading = false; onlineButton.disabled = false; renderResults(); }
+    }
+  }
+  async function selectOnlineProduct(item) {
+    if (disposed) return;
+    stopPending(); online.failure = null;
+    const saved = getFoods().find(entry => (entry.food.barcode || entry.food.label?.barcode) === item.barcode);
+    if (saved) { selectFood(saved); return; }
+    const current = generation;
+    request = new AbortController(); online.loading = true; onlineButton.disabled = true;
+    renderResults(); status.textContent = 'Carico i valori del prodotto…';
+    try {
+      const food = await lookupProduct(item.barcode, { signal: request.signal });
+      if (disposed || current !== generation) return;
+      const product = { ...food, name: food.name || item.name, brand: food.brand || item.brand || '' };
+      try { validatePersonalFood(product); }
+      catch {
+        manualFood(product);
+        status.textContent = 'Completa i valori mancanti e verifica l’etichetta prima di aggiungere.';
+        return;
+      }
+      selectFood({ id: `personal-${crypto.randomUUID()}`, food: product, grams: 100, personal: true, newProduct: true });
+    } catch (error) {
+      if (disposed || current !== generation) return;
+      online.failure = { message: error.message, retry: () => selectOnlineProduct(item),
+        manual: () => manualFood({ name: item.name, brand: item.brand || '', barcode: item.barcode }) };
+    } finally {
+      if (!disposed && current === generation) { request = null; online.loading = false; onlineButton.disabled = false; renderResults(); }
+    }
   }
   async function findBarcode(input) {
     let barcode;
@@ -88,6 +153,7 @@ export function createMealFoodPicker({ h, field, button, getFoods, add, getUsual
   }
   function renderResults() {
     const words = normalize(search.value.trim()).split(/\s+/).filter(Boolean);
+    onlineActions.replaceChildren();
     if (!words.length) {
       results.replaceChildren(); status.textContent = 'Scrivi il nome di un alimento per cercarlo.'; return;
     }
@@ -96,8 +162,17 @@ export function createMealFoodPicker({ h, field, button, getFoods, add, getUsual
     results.replaceChildren(...shown.map(item => button([
       h('strong', {}, item.food.name),
       h('small', {}, `${item.personal ? 'Personale · ' : ''}${item.food.brand ? `${item.food.brand} · ` : ''}Per 100 ${item.food.unit}: ${macros(item.food, 100)}`),
-    ], () => selectFood(item), 'picker-result', { 'aria-label': `Scegli ${item.food.name}` })));
-    status.textContent = matches.length ? `${matches.length} ${matches.length === 1 ? 'alimento' : 'alimenti'}${matches.length > shown.length ? ' · Affina la ricerca per vedere gli altri.' : ''}` : 'Nessun alimento trovato. Scegli “A mano” per inserirlo.';
+    ], () => selectFood(item), 'picker-result', { 'aria-label': `Scegli ${item.food.name}` })),
+    ...online.items.map(item => button([
+      h('strong', {}, item.name), h('small', {}, `${item.brand ? `${item.brand} · ` : ''}Open Food Facts`),
+    ], () => { void selectOnlineProduct(item); }, 'picker-result picker-online-result', { 'aria-label': `Scegli online ${item.name}` })));
+    status.textContent = matches.length ? `${matches.length} ${matches.length === 1 ? 'alimento' : 'alimenti'}${matches.length > shown.length ? ' · Affina la ricerca per vedere gli altri.' : ''}` : 'Nessun alimento locale trovato. Usa “Cerca online” o scegli “A mano”.';
+    if (online.query) status.textContent = online.loading ? 'Cerco su Open Food Facts…' : online.items.length ? `${online.items.length} prodotti online${matches.length ? ` · ${matches.length} locali` : ''}` : 'Nessun prodotto online trovato. Prova un altro nome o scegli “A mano”.';
+    if (online.failure) {
+      status.textContent = online.failure.message;
+      onlineActions.append(button('Riprova', () => { void online.failure.retry(); }, 'button secondary small picker-online-retry'));
+      if (online.failure.manual) onlineActions.append(button('Inserisci a mano', online.failure.manual, 'text-button'));
+    } else if (online.hasMore) onlineActions.append(button('Altri risultati', () => { void searchOnline(online.page + 1); }, 'button secondary small picker-online-more', { disabled: online.loading }));
   }
   function validAmount(amount, spec) {
     const value = amount.valueAsNumber;
@@ -109,7 +184,7 @@ export function createMealFoodPicker({ h, field, button, getFoods, add, getUsual
     stopPending(); showEditor(); status.textContent = '';
     const spec = quantitySpec(item.id, item.food);
     const amount = h('input', { type: 'number', min: spec.min, max: spec.max, step: spec.step, required: true, inputmode: 'decimal', value: toDisplayAmount(item.id, item.food, getUsualQuantity(item.id, item.food, item.grams || 100)), 'aria-label': `Quantità da aggiungere in ${spec.unit}` });
-    const remember = h('input', { type: 'checkbox', class: 'remember-quantity' });
+    const remember = h('input', { type: 'checkbox', class: 'remember-quantity', checked: Boolean(item.newProduct) });
     const preview = h('p', { class: 'portion-totals', role: 'status' });
     const error = h('p', { class: 'form-error', role: 'alert' });
     const update = () => { preview.textContent = validAmount(amount, spec) ? macros(item.food, toStoredAmount(item.id, item.food, amount.valueAsNumber)) : amountHint(spec); };
@@ -118,10 +193,12 @@ export function createMealFoodPicker({ h, field, button, getFoods, add, getUsual
       event.preventDefault();
       if (!validAmount(amount, spec)) { error.textContent = amountHint(spec); amount.reportValidity(); return; }
       try {
-        add({ foodId: item.id, grams: toStoredAmount(item.id, item.food, amount.valueAsNumber), ...(item.personal ? { foodSnapshot: { ...item.food } } : {}) }, null, allowRemember && remember.checked);
+        const grams = toStoredAmount(item.id, item.food, amount.valueAsNumber);
+        add({ foodId: item.id, grams, ...(item.personal ? { foodSnapshot: { ...item.food } } : {}) },
+          item.newProduct && allowRemember && remember.checked ? { id: item.id, food: { ...item.food }, grams } : null, allowRemember && remember.checked);
         close(`${item.food.name} aggiunto ${context === 'recipe' ? 'alla ricetta' : 'al pasto'}.`);
       } catch (e) { error.textContent = e.message; }
-    } }, h('h4', {}, item.food.name), field(`Quantità · ${spec.unit}`, amount, item.food.unitNote), preview, allowRemember && h('label', { class: 'picker-remember' }, remember, 'Usa questa quantità come abituale'), error,
+    } }, h('h4', {}, item.food.name), field(`Quantità · ${spec.unit}`, amount, item.food.unitNote), preview, allowRemember && h('label', { class: 'picker-remember' }, remember, item.newProduct ? 'Salva alimento e quantità abituale' : 'Usa questa quantità come abituale'), error,
     h('div', { class: 'form-actions' }, h('button', { type: 'submit', class: 'button primary' }, 'Aggiungi ingrediente'), button('Annulla aggiunta', () => chooseMode(mode)))));
     update(); amount.focus();
   }

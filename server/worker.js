@@ -1,3 +1,5 @@
+import { createFoodSearchHandler } from './food-search.js';
+
 const READ_SCOPE = 'https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly';
 const WRITE_SCOPE = 'https://www.googleapis.com/auth/googlehealth.nutrition.writeonly';
 const SESSION_COOKIE = '__Host-pasti-health';
@@ -123,10 +125,12 @@ export function createGoogleHealthWorker({ fetchImpl = (...args) => fetch(...arg
     } catch (error) { if (error?.code && error?.status) throw error; fail('GOOGLE_NETWORK_ERROR', 503); }
     finally { clearTimeout(timer); }
   }
+  const foodSearch = createFoodSearchHandler({ fetchImpl, now });
   const exchange = params => google(TOKEN_ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(params).toString() });
   return {
     async fetch(request, env) {
       const url = new URL(request.url);
+      if (url.pathname === '/api/foods/search') return foodSearch(request, env);
       if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(request);
       let origin;
       let callback = false;

@@ -1,9 +1,9 @@
 import { quantitySpec, toDisplayAmount, toStoredAmount, formatFoodAmount, normalizeOilIngredients, quantizeFoodAmount } from './src/food-measures.js?v=20261027-oil';
 import { BASE_RECIPES, BASE_RECIPE_FOODS } from './src/base-recipes.js?v=20261027-recipes';
-import { renderRecipeLibrary } from './src/recipes-ui.js?v=20261027-simple-meals';
+import { renderRecipeLibrary } from './src/recipes-ui.js?v=20261027-food-search';
 import { DEFAULT_MEAL_DISTRIBUTION, validateMealDistribution, remainingMealTargets, fitRecipeIngredients } from './src/recipe-fitting.js?v=20261027-oil';
 import { foodQuantityKey, usualFoodQuantity } from './src/food-quantities.js?v=20261027-barcode-quantities';
-import { createMealFoodPicker } from './src/meal-food-picker.js?v=20261027-simple-meals';
+import { createMealFoodPicker } from './src/meal-food-picker.js?v=20261027-food-search';
 import { MACRO_CHART_KEYS, macroGrams, macroChartSvg } from './src/macro-chart.js?v=20261027-neutral';
 import { renderPortions } from './src/portions-ui.js?v=20261027-simple-meals';
 import { ACTIVITY_LEVELS, calculateTargets, sumMacros } from './src/nutrition.js?v=20261027-neutral';
@@ -642,24 +642,9 @@ function editMeal(original) {
   const ingredientFields = h('div', { class: 'edit-ingredients' });
   const errors = h('p', { class: 'form-error', role: 'alert' });
   const controls = h('div', { class: 'swap-fields' });
-  const adaptation = h('div', { class: 'portion-update', 'aria-live': 'polite', 'aria-atomic': 'true', hidden: true });
   const alternatives = mealAlternatives(original, data.days[selectedDate].targets, data.foodOverrides);
   const recipes = allRecipes();
   const fitStatus = h('div');
-  const showAdaptation = before => {
-    const quantities = meal => meal.ingredients.reduce((map, item) => map.set(item.foodId, (map.get(item.foodId) || 0) + item.grams), new Map());
-    const previous = quantities(before);
-    const current = quantities(draft);
-    const ids = [...new Set([...previous.keys(), ...current.keys()])];
-    const quantityText = (id, amount) => formatFoodAmount(id, getIngredientFood(draft.ingredients.find(item => item.foodId === id) || before.ingredients.find(item => item.foodId === id)), amount);
-    const changes = ids.filter(id => formatDecimal(previous.get(id) || 0) !== formatDecimal(current.get(id) || 0));
-    adaptation.hidden = changes.length === 0;
-    adaptation.replaceChildren(...(changes.length ? [
-      h('strong', {}, 'Porzioni adattate automaticamente'),
-      h('ul', {}, ...changes.map(id => h('li', {}, h('span', {}, getIngredientFood(draft.ingredients.find(item => item.foodId === id) || before.ingredients.find(item => item.foodId === id)).name), h('span', { class: 'portion-change' },
-        !previous.has(id) ? `Aggiunto: ${quantityText(id, current.get(id))}` : !current.has(id) ? `${quantityText(id, previous.get(id))} → rimosso` : `${quantityText(id, previous.get(id))} → ${quantityText(id, current.get(id))}`)))),
-    ] : []));
-  };
   const updateTotals = () => {
     try {
       draft = mealFromIngredients(draft, data.foodOverrides);
@@ -677,7 +662,7 @@ function editMeal(original) {
           : draft.ingredients.find(ingredient => ids.includes(ingredient.foodId));
         if (!current) continue;
         controls.append(field(label, h('select', { onchange: event => {
-          try { const before = clone(draft); draft = swapMealFood(draft, current.foodId, event.target.value, data.foodOverrides); rebuild(); showAdaptation(before); backToMeal(); }
+          try { draft = swapMealFood(draft, current.foodId, event.target.value, data.foodOverrides); rebuild(); backToMeal(); }
           catch (error) { errors.textContent = error.message; }
         } }, ...ids.map(id => h('option', { value: id, selected: id === current.foodId }, getFood(id).name)))));
       }
@@ -687,8 +672,6 @@ function editMeal(original) {
       const measure = quantitySpec(ingredient.foodId, food);
       const grams = h('input', { id: `ingredient-${index}`, type: 'number', min: '0', max: measure.max, step: measure.step, inputmode: 'decimal', value: Number.isFinite(ingredient.grams) ? (measure.unit === 'cucchiai' ? toDisplayAmount(ingredient.foodId, food, ingredient.grams) : Number(ingredient.grams.toFixed(1))) : '', 'aria-label': `${food.name}, ${measure.unit === 'cucchiai' ? 'cucchiai' : food.unit === 'ml' ? 'millilitri' : 'grammi'}`, oninput: event => {
         fitStatus.replaceChildren();
-        adaptation.hidden = true;
-        adaptation.replaceChildren();
         const displayed = event.target.valueAsNumber;
         const validStep = measure.unit !== 'cucchiai' || Math.abs(displayed * 4 - Math.round(displayed * 4)) < 1e-8;
         const value = validStep && Number.isFinite(displayed) && displayed >= 0 ? toStoredAmount(ingredient.foodId, food, displayed) : NaN;
@@ -705,7 +688,7 @@ function editMeal(original) {
             rememberQuantity(ingredient.foodId, food, draft.ingredients[index].grams);
             quantityNote.textContent = `Abituale: ${formatFoodAmount(ingredient.foodId, food, draft.ingredients[index].grams)} · conferma salvando il pasto`;
           } catch (error) { errors.textContent = error.message; } }, 'text-button save-usual-quantity', { 'aria-label': `Usa come abituale per ${food.name}` })),
-        button('Rimuovi', () => { draft.ingredients.splice(index, 1); adaptation.hidden = true; rebuild(); }, 'text-button remove-ingredient', { 'aria-label': `Rimuovi ${food.name}` }));
+        button('Rimuovi', () => { draft.ingredients.splice(index, 1); rebuild(); }, 'text-button remove-ingredient', { 'aria-label': `Rimuovi ${food.name}` }));
     }));
     updateTotals();
   };
@@ -721,7 +704,6 @@ function editMeal(original) {
       if (habitual) rememberQuantity(ingredient.foodId, getIngredientFood(ingredient, data.foodOverrides), ingredient.grams);
       draft.ingredients.push(clone(ingredient));
       if (portion) pendingPortions.push(clone(portion));
-      adaptation.hidden = true;
       rebuild();
     },
   });
@@ -731,7 +713,6 @@ function editMeal(original) {
   const backToMeal = () => { recipeChooser.hidden = true; mealEditor.hidden = false; changeRecipe.focus(); };
   const chooseRecipe = entry => {
     try {
-      const before = clone(draft);
       if (entry.recipe) {
         const recipe = entry.recipe;
         const result = fitForSlot(data.days[selectedDate], original, recipe.ingredients, distributionFor(data.days[selectedDate]), fitModeFor(recipe.name));
@@ -741,7 +722,7 @@ function editMeal(original) {
         draft = { ...clone(entry.meal), ingredients: normalizeOilIngredients(entry.meal.ingredients, data.foodOverrides), id: original.id, slot: original.slot, time: original.time };
         rebuild();
       }
-      showAdaptation(before); backToMeal();
+      backToMeal();
     } catch (error) { errors.textContent = error.message; }
   };
   const normalizeSearch = value => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
@@ -770,12 +751,12 @@ function editMeal(original) {
   const changeRecipe = button('Cambia ricetta', () => { picker.close?.('', false); mealEditor.hidden = true; recipeChooser.hidden = false; renderRecipeChoices(); recipeSearch.focus(); }, 'button secondary small');
   mealEditor.append(h('div', { class: 'meal-editor-tools' }, changeRecipe,
     button('Adatta quantità ai macro', () => { try {
-      const before = clone(draft); const result = fitForSlot(data.days[selectedDate], draft, draft.ingredients);
-      fitted = true; draft.ingredients = result.ingredients; rebuild(); showAdaptation(before); fitStatus.replaceChildren(fitComparison(result));
+      const result = fitForSlot(data.days[selectedDate], draft, draft.ingredients);
+      fitted = true; draft.ingredients = result.ingredients; rebuild(); fitStatus.replaceChildren(fitComparison(result));
     } catch (e) { errors.textContent = e.message; } }, 'button secondary small')),
     fitStatus, ingredientFields, picker.element,
     h('details', { class: 'workflow-details' }, h('summary', {}, 'Dettagli delle quantità'),
-      h('p', { class: 'helper' }, 'Pesi a crudo o secco, salvo la nota dell’alimento. Olio in quarti di cucchiaio.'), adaptation), values,
+      h('p', { class: 'helper' }, 'Pesi a crudo o secco, salvo la nota dell’alimento. Olio in quarti di cucchiaio.')), values,
     h('div', { class: 'dialog-actions' }, button('Annulla', closeDialog), button('Salva questo pasto', () => {
       if (!draft.ingredients.length) { errors.textContent = 'Aggiungi almeno un ingrediente al pasto.'; return; }
       const invalid = [...ingredientFields.querySelectorAll('input')].some(input => !input.checkValidity() || input.value === '');

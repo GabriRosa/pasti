@@ -60,6 +60,14 @@ Il diario apre **Modifica pasto** con gli ingredienti e le quantità del pasto s
 
 **Alimenti** separa Ricette, Porzioni e Impostazioni. La modifica di una ricetta o porzione nasconde temporaneamente la libreria; annullare torna all’elenco senza salvare la bozza. Il riferimento per questa progressione è il flusso di [Cibo Sano](https://gabrirosa.github.io/cibo-sano/), nei moduli `diary-ui.js` e `kitchen-ui.js`. Non cambia il formato dei dati o lo storico dei pasti.
 
+## Ricerca online degli alimenti
+
+Da **Modifica pasto → Aggiungi alimento → Cerca**, scrivere filtra il catalogo locale e le porzioni personali. **Cerca online** o Invio cerca per nome o marca su Open Food Facts; **Altri risultati** carica la pagina successiva. La scelta legge i valori nutrizionali del prodotto e apre la quantità. Se mancano nutrienti, occorre completarli: un campo mancante non diventa zero. Il salvataggio della porzione abituale è facoltativo; il diario cambia solo con **Salva questo pasto**. La ricerca è disponibile anche mentre si compone una ricetta.
+
+[food-search.js](src/food-search.js) usa il proxy pubblico `GET /api/foods/search?q=…&page=…` del Worker Pasti, senza cookie o credenziali. [server/food-search.js](server/food-search.js) chiama soltanto l’endpoint ufficiale Search-a-licious, con campi limitati a codice, nome e marca. La scelta del risultato passa da `lookupProduct` per leggere i nutrienti normalizzati per 100 g/ml. Il proxy serve sia GitHub Pages sia il sito Worker; CORS è ristretto a queste due origini. Non legge D1, sessioni Google, profilo o diario. Il provider non esponeva CORS nelle verifiche HTTP del 27 ottobre 2026, quindi il browser non lo chiama direttamente.
+
+La ricerca è esplicita, senza chiamate durante la digitazione, in accordo con i [limiti Open Food Facts](https://openfoodfacts.github.io/openfoodfacts-server/api/). Il Worker conserva al massimo 100 ricerche pubbliche per cinque minuti e applica un limite indicativo di 10 chiamate upstream al minuto per istanza; non è un limite globale distribuito. Il client mantiene una piccola cache in memoria. Query, pagine, risposte e timeout sono limitati; errori e richieste annullate non producono salvataggi. La copertura dipende dal catalogo Open Food Facts e non comprende necessariamente ogni alimento. Restano disponibili codice a barre e inserimento manuale.
+
 ## Olio in cucchiai
 
 Nel diario, nelle ricette e nelle porzioni personali, l’olio si misura in cucchiai con incrementi di 0,25: per esempio 1,25, 1,5 e 1,75. Per il calcolo si usa un cucchiaio indicativo da 13,5 g, oppure 15 ml quando l’etichetta è per volume. Il riferimento di massa è la voce olio d’oliva delle [tabelle USDA](https://www.nal.usda.gov/sites/default/files/page-files/Total_Fat.pdf). La capacità dei cucchiai domestici può variare.

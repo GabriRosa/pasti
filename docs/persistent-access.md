@@ -54,3 +54,7 @@ Tutti i POST richiedono l’header `X-Pasti-Request: 1` e `Origin` uguale a `APP
 | `POST /api/health/disconnect` | Elimina sessione e autorizzazioni pendenti di questo browser |
 
 Fonti ufficiali consultate il 27 ottobre 2026: [Google OAuth per server Web](https://developers.google.com/identity/protocols/oauth2/web-server), [scadenza delle autorizzazioni Google](https://developers.google.com/identity/protocols/oauth2#expiration), [Workers con file statici](https://developers.cloudflare.com/workers/static-assets/), [Workers Free](https://developers.cloudflare.com/workers/platform/pricing/), [D1 Free e superamento quote](https://developers.cloudflare.com/d1/platform/pricing/), [segreti Worker](https://developers.cloudflare.com/workers/configuration/secrets/).
+
+## Ricerca pubblica degli alimenti
+
+Lo stesso Worker espone `GET /api/foods/search`, indipendente da `/api/health/`. Questo endpoint inoltra ricerche testuali a Open Food Facts senza usare cookie, credenziali Google o D1. Accetta richieste dal sito Worker e da GitHub Pages con CORS esatto; le regole di autenticazione degli endpoint Health restano invariate. Vedi [ricerca online nel README](../README.md#ricerca-online-degli-alimenti) per cache, limiti e flusso dei dati.

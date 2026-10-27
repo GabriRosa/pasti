@@ -1,5 +1,5 @@
 import { quantitySpec, toStoredAmount, formatFoodAmount, quantizeFoodAmount } from './food-measures.js?v=20261027-oil';
-import { createMealFoodPicker } from './meal-food-picker.js?v=20261027-simple-meals';
+import { createMealFoodPicker } from './meal-food-picker.js?v=20261027-food-search';
 import { mealFromIngredients } from './planner.js?v=20261027-oil';
 
 const SLOTS = [

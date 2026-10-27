@@ -333,12 +333,6 @@ dialog::backdrop { background: #080808bb; backdrop-filter: blur(3px); }
 .dialog-heading .icon-button { flex: none; }
 .swap-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .swap-explanation { font-size: .74rem; color: var(--ink-soft); line-height: 1.6; margin: -5px 0 20px; }
-.portion-update { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 15px 17px; margin: 0 0 18px; font-size: .76rem; }
-.portion-update[hidden] { display: none; }
-.portion-update > strong { font-weight: 620; }
-.portion-update ul { list-style: none; padding: 0; margin: 9px 0 0; }
-.portion-update li { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 4px 0; }
-.portion-update .portion-change { text-align: right; flex: none; font-variant-numeric: tabular-nums; }
 .edit-ingredient { display: flex; align-items: center; justify-content: space-between; gap: 17px; padding: 17px 0; border-top: 1px solid var(--line); }
 .edit-ingredient label { font-size: .87rem; font-weight: 580; display: block; }
 .edit-ingredient small { display: block; color: var(--ink-soft); margin-top: 3px; font-size: .7rem; max-width: 42ch; }
@@ -516,8 +510,6 @@ dialog::backdrop { background: #080808bb; backdrop-filter: blur(3px); }
   .dialog-heading p { font-size: .73rem; }
   .dialog-heading .icon-button { width: 38px; height: 38px; min-width: 38px; }
   .swap-fields { grid-template-columns: 1fr; gap: 0; }
-  .portion-update { padding: 14px; font-size: .7rem; }
-  .portion-update li { flex-wrap: wrap; gap: 2px 10px; }
   .edit-ingredient { gap: 10px; }
   .edit-ingredient label { font-size: .79rem; }
   .edit-ingredient small { font-size: .63rem; }
@@ -677,4 +669,15 @@ input[type="checkbox"] { accent-color: var(--accent); }
   .recipe-catalog .form-actions { gap: 12px; }
   .recipe-catalog .button { padding: 10px 12px; }
   .meal-editor-view .gram-control input { width: 76px; font-size: 16px; }
+}
+
+/* One input for local matches and explicit online search. */
+.picker-search-form { display: flex; align-items: end; gap: 10px; margin: 16px 0 10px; }
+.picker-search-form .field { flex: 1; min-width: 0; margin: 0; }
+.picker-search-form > button { flex: none; }
+.picker-online-actions { margin-top: 12px; }
+@media (max-width: 600px) {
+  .picker-search-form { flex-wrap: wrap; }
+  .picker-search-form .field { flex-basis: 100%; }
+  .picker-search-form > button { width: 100%; }
 }

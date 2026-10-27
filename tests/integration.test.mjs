@@ -694,11 +694,8 @@ test('pasta-to-lentil UI swap shows the lower chicken portion and counts every p
   const expected = swapMealFood(original, 'pasta', 'lentil-pasta-lidl');
   const chicken = expected.ingredients.find(item => item.foodId === 'chicken');
   assert.ok(chicken.grams < 170);
-  const comparison = document.querySelector('.portion-update');
-  assert.equal(comparison.hidden, false);
-  assert.equal(comparison.attributes['aria-live'], 'polite');
-  const chickenRow = comparison.querySelectorAll('li').find(row => row.children[0].textContent === getFood('chicken').name);
-  assert.ok(chickenRow, 'The adapted chicken portion must be included in the comparison');
+  assert.equal(document.querySelector('.portion-update'), null);
+  assert.doesNotMatch(document.querySelector('#app-dialog').textContent, /Porzioni adattate automaticamente/);
   const portion = document.querySelectorAll('.edit-ingredients input').find(input => input.attributes['aria-label'] === `${getFood('chicken').name}, grammi`);
   assert.equal(portion.valueAsNumber, Number(chicken.grams.toFixed(1)));
   assert.equal(store.writes, 1, 'Changing the draft must not persist before Save');
@@ -710,7 +707,7 @@ test('pasta-to-lentil UI swap shows the lower chicken portion and counts every p
   assertMacrosClose(result.macros, sumMacros(result.ingredients.map(item => foodMacros(item.foodId, item.grams))));
 });
 
-test('manual portion edits clear the previous swap comparison and Cancel writes nothing', async t => {
+test('manual portion edits after a swap update totals without an adaptation panel and Cancel writes nothing', async t => {
   const { data, key, lunchId } = pastaAndChickenDiary();
   const store = new MemoryStorage(); saveData(data, store);
   const initialJSON = store.getItem(STORAGE_KEY);
@@ -720,10 +717,16 @@ test('manual portion edits clear the previous swap comparison and Cancel writes 
   const select = document.querySelector('.swap-fields select');
   select.value = 'lentil-pasta-lidl'; select.dispatch('change');
   assert.equal(isVisible(document.querySelector('.meal-editor-view')), true);
-  assert.equal(document.querySelector('.portion-update').hidden, false);
+  assert.equal(document.querySelector('.portion-update'), null);
+  const swapped = swapMealFood(data.days[key].meals.find(item => item.id === lunchId), 'pasta', 'lentil-pasta-lidl');
   const portion = document.querySelector('.edit-ingredients input');
   portion.value = '120'; portion.dispatch('input');
-  assert.equal(document.querySelector('.portion-update').hidden, true);
+  swapped.ingredients[0].grams = 120;
+  const expected = mealFromIngredients(swapped);
+  assert.equal(portion.valueAsNumber, 120);
+  assert.equal(document.querySelector('.edit-macro-total strong').textContent, `${Math.round(expected.macros.kcal)} kcal`);
+  assert.equal(document.querySelector('.portion-update'), null);
+  assert.doesNotMatch(document.querySelector('#app-dialog').textContent, /Porzioni adattate automaticamente/);
   document.querySelector('.dialog-actions button.secondary').click();
   assert.equal(store.getItem(STORAGE_KEY), initialJSON);
   assert.equal(store.writes, 1);
@@ -3131,3 +3134,292 @@ for (const section of ['Ricette', 'Porzioni']) {
     assert.equal(store.writes, 1);
   });
 }
+
+const onlineFoodSummary = { barcode: '036000291452', name: 'Bevanda test', brand: 'Test' };
+const onlineFoodSearchResponse = (items = [onlineFoodSummary], page = 1, hasMore = false) => ({
+  ok: true, json: async () => ({ items, page, hasMore }),
+});
+function assertFoodSearchRequest(input, options, query, page = 1) {
+  const url = new URL(input);
+  assert.equal(url.origin, 'https://pasti.gabri-rosso02.workers.dev');
+  assert.equal(url.pathname, '/api/foods/search');
+  assert.equal(url.searchParams.get('q'), query);
+  assert.equal(url.searchParams.get('page'), String(page));
+  assert.deepEqual([...url.searchParams.keys()].sort(), ['page', 'q']);
+  assert.equal(options.credentials, 'omit');
+  assert.equal(options.referrerPolicy, 'no-referrer');
+}
+const settleFoodSearch = () => new Promise(resolve => setImmediate(resolve));
+
+test('online food selection loads nutrients, saves only with the meal and reuses the personal usual quantity', async t => {
+  const key = todayKey(), initial = generatedDiary(key), store = new MemoryStorage(); saveData(initial, store);
+  let searches = 0, products = 0;
+  const { document } = await bootApp(t, store, 'today', { fetchImpl: async (input, options) => {
+    const url = new URL(input);
+    if (url.pathname === '/api/foods/search') {
+      assertFoodSearchRequest(input, options, 'Bevanda test'); searches++;
+      return onlineFoodSearchResponse();
+    }
+    assert.equal(url.origin, 'https://world.openfoodfacts.org');
+    assert.equal(url.pathname, '/api/v3.6/product/036000291452'); products++;
+    return { ok: true, json: async () => barcodeFixture() };
+  } });
+  openComposer(document); openFoodPicker(document);
+  fillComposer(document, '.picker-search-form input', 'Bevanda test');
+  assert.equal(searches, 0, 'Typing must search locally until the explicit online submission');
+  document.querySelector('.picker-search-form').dispatch('submit'); await settleFoodSearch();
+  const result = document.querySelector('.picker-online-result');
+  assert.match(result.textContent, /Bevanda test.*Test.*Open Food Facts/);
+  assert.equal(products, 0, 'Search summaries must not require a nutrient request for every result');
+  assert.deepEqual(loadData(store).data, initial);
+  result.click(); await settleFoodSearch();
+  assert.equal(document.querySelector('.picker-manual-form'), null);
+  assert.ok(isVisible(document.querySelector('.picker-amount-form')));
+  assert.equal(document.querySelector('.picker-amount-form input').valueAsNumber, 100);
+  assert.match(document.querySelector('.picker-amount-form .portion-totals').textContent, /40 kcal/);
+  fillComposer(document, '.picker-amount-form input', '250');
+  assert.equal(document.querySelector('.remember-quantity').checked, true);
+  document.querySelector('.picker-amount-form').dispatch('submit');
+  assert.deepEqual(loadData(store).data, initial);
+  assert.equal(store.writes, 1);
+  composerButton(document, 'Salva questo pasto').click();
+  const saved = loadData(store).data, ingredient = saved.days[key].meals[0].ingredients.at(-1);
+  assert.deepEqual(ingredient.foodSnapshot, { ...onlineFoodSummary, unit: 'ml', kcal: 40, protein: 3, carbs: 4, fat: 1 });
+  assert.equal(ingredient.grams, 250);
+  assert.deepEqual(saved.personalPortions, [{ id: ingredient.foodId, food: ingredient.foodSnapshot, grams: 250 }]);
+  assert.deepEqual(saved.usualQuantities['barcode-036000291452'], { grams: 250, unit: 'ml' });
+  assertMacrosClose(saved.days[key].meals[0].macros, mealFromIngredients(saved.days[key].meals[0]).macros);
+  assert.deepEqual(saved.days[key].meals.slice(1), initial.days[key].meals.slice(1));
+  assert.deepEqual(saved.days[key].consumed, initial.days[key].consumed);
+  assert.deepEqual(parseBackup(exportBackup(saved)), saved);
+  assert.equal(store.writes, 2);
+
+  openComposer(document); openFoodPicker(document);
+  fillComposer(document, '.picker-search-form input', 'Bevanda test');
+  assert.equal(searches, 1);
+  document.querySelector('.picker-result').click();
+  assert.equal(document.querySelector('.picker-amount-form input').valueAsNumber, 250);
+  clickText(document.querySelector('.meal-food-picker'), 'Torna alla ricerca');
+  document.querySelector('.picker-search-form').dispatch('submit'); await settleFoodSearch();
+  document.querySelector('.picker-online-result').click(); await settleFoodSearch();
+  assert.equal(searches, 1, 'Repeating the same online query must reuse the adapter cache');
+  assert.equal(products, 1, 'A matching saved barcode must reuse its validated personal snapshot');
+  assert.equal(document.querySelector('.picker-amount-form input').valueAsNumber, 250);
+  assert.equal(document.querySelector('.remember-quantity').checked, false);
+  fillComposer(document, '.picker-amount-form input', '120');
+  document.querySelector('.picker-amount-form').dispatch('submit');
+  assert.deepEqual(loadData(store).data, saved);
+  composerButton(document, 'Salva questo pasto').click();
+  const reused = loadData(store).data;
+  assert.equal(reused.days[key].meals[0].ingredients.at(-1).foodId, ingredient.foodId);
+  assert.equal(reused.days[key].meals[0].ingredients.at(-1).grams, 120);
+  assert.deepEqual(reused.personalPortions, saved.personalPortions);
+  assert.deepEqual(reused.usualQuantities, saved.usualQuantities);
+  assertMacrosClose(reused.days[key].meals[0].macros, mealFromIngredients(reused.days[key].meals[0]).macros);
+  assert.equal(store.writes, 3);
+});
+
+test('cancelling a meal after adding an online food discards its snapshot and usual quantity', async t => {
+  const initial = generatedDiary(todayKey()), store = new MemoryStorage(); saveData(initial, store);
+  const { document } = await bootApp(t, store, 'today', { fetchImpl: async (input, options) => {
+    if (new URL(input).pathname === '/api/foods/search') {
+      assertFoodSearchRequest(input, options, 'Bevanda test'); return onlineFoodSearchResponse();
+    }
+    assert.equal(new URL(input).pathname, '/api/v3.6/product/036000291452');
+    return { ok: true, json: async () => barcodeFixture() };
+  } });
+  openComposer(document); openFoodPicker(document);
+  fillComposer(document, '.picker-search-form input', 'Bevanda test');
+  document.querySelector('.picker-search-form').dispatch('submit'); await settleFoodSearch();
+  document.querySelector('.picker-online-result').click(); await settleFoodSearch();
+  document.querySelector('.picker-amount-form').dispatch('submit');
+  assert.equal(document.querySelectorAll('.edit-ingredient').length, initial.days[todayKey()].meals[0].ingredients.length + 1);
+  composerButton(document, 'Annulla').click();
+  assert.deepEqual(loadData(store).data, initial);
+  assert.equal(store.writes, 1);
+});
+
+test('online products with missing nutrients require manual completion before they enter the meal draft', async t => {
+  const key = todayKey(), initial = generatedDiary(key), store = new MemoryStorage(); saveData(initial, store);
+  const { document } = await bootApp(t, store, 'today', { fetchImpl: async (input, options) => {
+    if (new URL(input).pathname === '/api/foods/search') {
+      assertFoodSearchRequest(input, options, 'Bevanda incompleta'); return onlineFoodSearchResponse();
+    }
+    assert.equal(new URL(input).pathname, '/api/v3.6/product/036000291452');
+    const payload = barcodeFixture(); delete payload.product.nutrition.aggregated_set.nutrients.proteins;
+    return { ok: true, json: async () => payload };
+  } });
+  openComposer(document); openFoodPicker(document);
+  fillComposer(document, '.picker-search-form input', 'Bevanda incompleta');
+  document.querySelector('.picker-search-form').dispatch('submit'); await settleFoodSearch();
+  document.querySelector('.picker-online-result').click(); await settleFoodSearch();
+  assert.equal(document.querySelector('.picker-amount-form'), null);
+  assert.equal(document.querySelector('.picker-manual-form input').value, 'Bevanda test');
+  assert.equal(document.querySelector('input[data-metric="protein"]').value, '');
+  assert.equal(document.querySelector('input[data-metric="kcal"]').valueAsNumber, 40);
+  document.querySelector('.picker-manual-form').dispatch('submit');
+  assert.equal(document.querySelectorAll('.edit-ingredient').length, initial.days[key].meals[0].ingredients.length);
+  assert.deepEqual(loadData(store).data, initial);
+  fillComposer(document, 'input[data-metric="protein"]', '3');
+  document.querySelector('.picker-manual-form').dispatch('submit');
+  assert.deepEqual(loadData(store).data, initial);
+  composerButton(document, 'Salva questo pasto').click();
+  const saved = loadData(store).data;
+  assert.equal(saved.days[key].meals[0].ingredients.at(-1).foodSnapshot.protein, 3);
+  assert.equal(saved.days[key].meals[0].ingredients.at(-1).foodSnapshot.barcode, onlineFoodSummary.barcode);
+  assertMacrosClose(saved.days[key].meals[0].macros, mealFromIngredients(saved.days[key].meals[0]).macros);
+  assert.equal(store.writes, 2);
+});
+
+test('online empty results and rate limits keep the draft intact and retry the requested query', async t => {
+  const initial = generatedDiary(todayKey()), store = new MemoryStorage(); saveData(initial, store);
+  let rateAttempts = 0;
+  const { document } = await bootApp(t, store, 'today', { fetchImpl: async (input, options) => {
+    const query = new URL(input).searchParams.get('q');
+    assertFoodSearchRequest(input, options, query);
+    if (query === 'Nessun prodotto') return onlineFoodSearchResponse([]);
+    assert.equal(query, 'Bevanda test');
+    if (++rateAttempts === 1) return { ok: false, status: 429, json: async () => ({ error: 'RATE_LIMITED' }) };
+    return onlineFoodSearchResponse();
+  } });
+  openComposer(document); openFoodPicker(document);
+  fillComposer(document, '.picker-search-form input', 'Nessun prodotto');
+  document.querySelector('.picker-search-form').dispatch('submit'); await settleFoodSearch();
+  assert.equal(document.querySelectorAll('.picker-online-result').length, 0);
+  assert.match(document.querySelector('.picker-status').textContent, /Nessun prodotto online trovato/);
+  fillComposer(document, '.picker-search-form input', 'Bevanda test');
+  document.querySelector('.picker-search-form').dispatch('submit'); await settleFoodSearch();
+  assert.equal(document.querySelectorAll('.picker-online-result').length, 0);
+  assert.match(document.querySelector('.picker-status').textContent, /ricerche|attendi|riprova/i);
+  clickText(document.querySelector('.meal-food-picker'), 'Riprova'); await settleFoodSearch();
+  assert.equal(rateAttempts, 2);
+  assert.equal(document.querySelectorAll('.picker-online-result').length, 1);
+  assert.equal(document.querySelector('.picker-manual-form'), null);
+  assert.deepEqual(loadData(store).data, initial);
+  assert.equal(store.writes, 1);
+});
+
+test('a failed online nutrient lookup offers manual entry with the selected identity and no invented nutrients', async t => {
+  const initial = generatedDiary(todayKey()), store = new MemoryStorage(); saveData(initial, store);
+  const { document } = await bootApp(t, store, 'today', { fetchImpl: async (input, options) => {
+    if (new URL(input).pathname === '/api/foods/search') {
+      assertFoodSearchRequest(input, options, 'Bevanda test'); return onlineFoodSearchResponse();
+    }
+    assert.equal(new URL(input).pathname, '/api/v3.6/product/036000291452');
+    return { ok: false, status: 502 };
+  } });
+  openComposer(document); openFoodPicker(document);
+  fillComposer(document, '.picker-search-form input', 'Bevanda test');
+  document.querySelector('.picker-search-form').dispatch('submit'); await settleFoodSearch();
+  document.querySelector('.picker-online-result').click(); await settleFoodSearch();
+  assert.equal(document.querySelector('.picker-amount-form'), null);
+  clickText(document.querySelector('.meal-food-picker'), 'Inserisci a mano');
+  assert.equal(document.querySelector('.picker-manual-form input').value, 'Bevanda test');
+  assert.match(document.querySelector('.picker-manual-form').textContent, /036000291452/);
+  for (const metric of ['kcal', 'protein', 'carbs', 'fat']) assert.equal(document.querySelector(`input[data-metric="${metric}"]`).value, '');
+  document.querySelector('.picker-manual-form').dispatch('submit');
+  assert.equal(document.querySelectorAll('.edit-ingredient').length, initial.days[todayKey()].meals[0].ingredients.length);
+  assert.deepEqual(loadData(store).data, initial);
+  assert.equal(store.writes, 1);
+});
+
+test('editing an online query aborts its previous request and a late result cannot replace newer matches', async t => {
+  const initial = generatedDiary(todayKey()), store = new MemoryStorage(); saveData(initial, store);
+  const fresh = { barcode: '4006381333931', name: 'Alimento corrente', brand: 'Nuovo' };
+  let resolveOld, oldSignal;
+  const { document } = await bootApp(t, store, 'today', { fetchImpl: (input, options) => {
+    const query = new URL(input).searchParams.get('q'); assertFoodSearchRequest(input, options, query);
+    if (query === 'Query precedente') {
+      oldSignal = options.signal; return new Promise(resolve => { resolveOld = resolve; });
+    }
+    assert.equal(query, 'Query corrente'); return Promise.resolve(onlineFoodSearchResponse([fresh]));
+  } });
+  openComposer(document); openFoodPicker(document);
+  fillComposer(document, '.picker-search-form input', 'Query precedente');
+  document.querySelector('.picker-search-form').dispatch('submit');
+  assert.equal(oldSignal.aborted, false);
+  fillComposer(document, '.picker-search-form input', 'Query corrente');
+  assert.equal(oldSignal.aborted, true);
+  document.querySelector('.picker-search-form').dispatch('submit'); await settleFoodSearch();
+  resolveOld(onlineFoodSearchResponse()); await settleFoodSearch();
+  const matches = document.querySelectorAll('.picker-online-result');
+  assert.equal(matches.length, 1);
+  assert.match(matches[0].textContent, /Alimento corrente/);
+  assert.doesNotMatch(document.querySelector('.picker-results').textContent, /Bevanda test/);
+  assert.equal(document.querySelector('.picker-search-form button').disabled, false);
+  assert.deepEqual(loadData(store).data, initial);
+  assert.equal(store.writes, 1);
+});
+
+test('a late online nutrient response cannot replace a manual entry opened after changing mode', async t => {
+  const initial = generatedDiary(todayKey()), store = new MemoryStorage(); saveData(initial, store);
+  let resolveProduct, productSignal;
+  const { document } = await bootApp(t, store, 'today', { fetchImpl: (input, options) => {
+    if (new URL(input).pathname === '/api/foods/search') {
+      assertFoodSearchRequest(input, options, 'Bevanda test'); return Promise.resolve(onlineFoodSearchResponse());
+    }
+    assert.equal(new URL(input).pathname, '/api/v3.6/product/036000291452');
+    productSignal = options.signal; return new Promise(resolve => { resolveProduct = resolve; });
+  } });
+  openComposer(document); openFoodPicker(document);
+  fillComposer(document, '.picker-search-form input', 'Bevanda test');
+  document.querySelector('.picker-search-form').dispatch('submit'); await settleFoodSearch();
+  document.querySelector('.picker-online-result').click();
+  assert.equal(productSignal.aborted, false);
+  clickText(document.querySelector('.meal-food-picker'), 'A mano');
+  fillComposer(document, '.picker-manual-form input', 'Inserimento indipendente');
+  assert.equal(productSignal.aborted, true);
+  resolveProduct({ ok: true, json: async () => barcodeFixture() }); await settleFoodSearch();
+  assert.equal(document.querySelector('.picker-manual-form input').value, 'Inserimento indipendente');
+  assert.equal(document.querySelector('.picker-amount-form'), null);
+  assert.deepEqual(loadData(store).data, initial);
+  assert.equal(store.writes, 1);
+});
+
+test('switching library sections disposes an online recipe search and ignores its late result', async t => {
+  const initial = generatedDiary(todayKey()), store = new MemoryStorage(); saveData(initial, store);
+  let resolveRequest, signal;
+  const { document } = await bootApp(t, store, 'foods', { fetchImpl: (input, options) => {
+    assertFoodSearchRequest(input, options, 'Bevanda test');
+    signal = options.signal; return new Promise(resolve => { resolveRequest = resolve; });
+  } });
+  const oldPanel = document.querySelector('.recipes-panel');
+  clickText(oldPanel, 'Nuova ricetta'); openFoodPicker(document);
+  fillComposer(document, '.picker-search-form input', 'Bevanda test');
+  document.querySelector('.picker-search-form').dispatch('submit');
+  assert.equal(signal.aborted, false);
+  selectFoodsView(document, 'Porzioni');
+  assert.equal(signal.aborted, true);
+  assert.equal(oldPanel.isConnected, false);
+  const oldText = oldPanel.textContent;
+  resolveRequest(onlineFoodSearchResponse()); await settleFoodSearch();
+  assert.equal(oldPanel.textContent, oldText);
+  assert.equal(oldPanel.querySelector('.picker-online-result'), null);
+  selectFoodsView(document, 'Ricette');
+  assert.ok(isVisible(document.querySelector('.recipes-panel .library-view')));
+  assert.equal(document.querySelector('.picker-online-result'), null);
+  assert.deepEqual(loadData(store).data, initial);
+  assert.equal(store.writes, 1);
+});
+
+test('online pagination retains earlier matches and requests the next page without loading nutrients', async t => {
+  const initial = generatedDiary(todayKey()), store = new MemoryStorage(); saveData(initial, store);
+  const second = { barcode: '4006381333931', name: 'Secondo prodotto', brand: 'Test' }, pages = [];
+  const { document } = await bootApp(t, store, 'today', { fetchImpl: async (input, options) => {
+    const page = Number(new URL(input).searchParams.get('page'));
+    assertFoodSearchRequest(input, options, 'Prodotti test', page); pages.push(page);
+    if (page === 1) return onlineFoodSearchResponse([onlineFoodSummary], 1, true);
+    assert.equal(page, 2); return onlineFoodSearchResponse([second], 2, false);
+  } });
+  openComposer(document); openFoodPicker(document);
+  fillComposer(document, '.picker-search-form input', 'Prodotti test');
+  document.querySelector('.picker-search-form').dispatch('submit'); await settleFoodSearch();
+  assert.equal(document.querySelectorAll('.picker-online-result').length, 1);
+  clickText(document.querySelector('.meal-food-picker'), 'Altri risultati'); await settleFoodSearch();
+  assert.deepEqual(pages, [1, 2]);
+  assert.deepEqual(document.querySelectorAll('.picker-online-result strong').map(node => node.textContent), ['Bevanda test', 'Secondo prodotto']);
+  assert.equal(document.querySelector('.picker-online-more'), null);
+  assert.equal(document.querySelector('.picker-amount-form'), null);
+  assert.deepEqual(loadData(store).data, initial);
+  assert.equal(store.writes, 1);
+});
