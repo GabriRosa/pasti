@@ -40,5 +40,5 @@ export function macroChartSvg(macros) {
     const targetY = 18 + index * 22;
     labels.push(`<path d="M ${x} ${y} L 246 ${targetY}" fill="none" stroke="#59675f" stroke-width="1"/><rect x="242" y="${targetY - 12}" width="57" height="23" rx="6" fill="${item.color}" stroke="#59675f" stroke-width=".7"/><text x="270" y="${targetY}" fill="${item.key === 'protein' ? '#ffffff' : '#172820'}">${macroGrams(item.grams).replace('<', '&lt;')} g</text>`);
   });
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 225"><g stroke="#78867b" stroke-width="1">${total ? paths.join('') : `<circle cx="${cx}" cy="${cy}" r="${radius}" fill="#f0f0e9"/>`}</g><g font-family="system-ui, sans-serif" font-size="14" font-weight="650" text-anchor="middle" dominant-baseline="middle">${total ? labels.join('') : `<text x="${cx}" y="${cy}" fill="#172820">0 g</text>`}</g></svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 225"><g stroke="#78867b" stroke-width="1">${total ? paths.join('') : `<circle cx="${cx}" cy="${cy}" r="${radius}" fill="#f0f0e9"/>`}</g><g font-family="system-ui, sans-serif" font-size="19" font-weight="650" text-anchor="middle" dominant-baseline="middle">${total ? labels.join('') : `<text x="${cx}" y="${cy}" fill="#172820">0 g</text>`}</g></svg>`;
 }

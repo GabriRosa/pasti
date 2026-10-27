@@ -541,19 +541,24 @@ dialog::backdrop { background: #14251b77; backdrop-filter: blur(3px); }
 .personal-portions .form-actions { flex-wrap: wrap; }
 @media (max-width: 540px) { .barcode-search { align-items: stretch; flex-direction: column; } .portion-editor { padding: 1rem; } }
 
-.meal-macro-chart { display: flex; align-items: center; flex-wrap: nowrap; gap: 22px; margin: 8px 0 2px; }
-.macro-pie { display: block; flex: 0 1 240px; width: 240px; max-width: 52%; height: auto; }
-.meal-macro-chart figcaption { flex: 0 1 250px; min-width: 0; }
-.meal-macro-chart .meal-calories { display: block; font-size: 1.2rem; font-weight: 650; margin-bottom: 12px; }
-.macro-pie-legend { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
-.macro-pie-legend li { display: grid; grid-template-columns: 12px 1fr auto; align-items: center; gap: 8px; font-size: .75rem; }
-.macro-pie-legend b { font-weight: 600; white-space: nowrap; }
-.macro-pie-swatch { width: 12px; height: 12px; border: 1px solid #78867b; border-radius: 3px; }
-.macro-pie-caption { display: block; font-size: .61rem; color: var(--ink-soft); margin-top: 12px; line-height: 1.5; }
+.meal-title-row { align-items: flex-start; gap: 14px; }
+.meal-heading { min-width: 0; flex: 1; }
+.meal-heading h3 { overflow-wrap: anywhere; }
+.meal-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 10px 0 15px; }
+.meal-calories { font-size: 1rem; font-weight: 650; }
+.meal-macro-chart { display: block; flex: 0 0 165px; width: 165px; margin: -8px -9px 0 0; }
+.macro-pie { display: block; width: 100%; height: auto; }
+.ingredient-list { display: block; padding-left: 19px; margin: 4px 0 16px; list-style: disc; }
+.ingredient-list li { padding-left: 3px; margin-bottom: 11px; }
+.ingredient-list li::marker { color: var(--forest); font-size: .8em; }
+.ingredient-name { display: block; color: var(--ink); }
+.ingredient-macros { display: block; font-size: .67rem; margin-top: 3px; color: var(--ink-soft); line-height: 1.55; }
+.ingredient-label-note { display: block; color: var(--ink-soft); font-size: .62rem; }
 @media (max-width: 540px) {
-  .meal-macro-chart { flex-wrap: wrap; justify-content: center; gap: 4px; }
-  .macro-pie { flex-basis: 260px; width: 260px; max-width: 100%; }
-  .meal-macro-chart figcaption { flex: 1 1 100%; }
-  .meal-macro-chart .meal-calories { text-align: center; margin-bottom: 10px; }
-  .macro-pie-caption { text-align: center; }
+  .meal-title-row { gap: 5px; }
+  .meal-macro-chart { flex-basis: 120px; width: 120px; margin-right: -10px; }
+  .meal-heading h3 { font-size: .91rem; }
+  .meal-summary { gap: 7px; }
+  .ingredient-list { margin-top: 12px; }
+  .ingredient-macros { font-size: .65rem; }
 }

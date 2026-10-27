@@ -1,4 +1,4 @@
-import { validatePersonalFood } from './barcode.js?v=20261027-meal-charts';
+import { validatePersonalFood } from './barcode.js?v=20261027-compact-meals';
 const crea = code => `https://www.alimentinutrizione.it/tabelle-nutrizionali/${code}`;
 const food = (id, name, group, kcal, protein, carbs, fat, unitNote, source, estimated = false, label) =>
   Object.freeze({ id, name, group, kcal, protein, carbs, fat, unitNote, source, estimated, unit: id == 'skim-milk' ? 'ml' : 'g',
