@@ -308,7 +308,7 @@ test('all catalog foods provide persistable ingredient quantities and finite con
 
 // Exercise the app's real event handlers without a browser or a layout engine.
 // This surface implements only the DOM operations used by app.js; visual and
-// native accessibility behavior remain part of the coordinator's browser pass.
+// native accessibility behavior require a separate real-browser check.
 class MemoryElement {
   constructor(tag = '#text', text = '') {
     this.tagName = tag.toUpperCase(); this.children = []; this.attributes = {};
@@ -384,7 +384,11 @@ class MemoryElement {
       current = event.bubbles && !event.cancelBubble ? current.parentNode : null;
     } while (current);
   }
-  click() { if (!this.isDisabled) this.dispatch('click'); }
+  click() {
+    if (this.isDisabled) return;
+    this.dispatch('click');
+    if (this.tagName === 'SUMMARY' && this.parentNode?.tagName === 'DETAILS') this.parentNode.open = !this.parentNode.open;
+  }
   focus() { globalThis.document.activeElement = this; }
   scrollIntoView() {}
   showModal() { this.open = true; }
@@ -580,6 +584,8 @@ test('profile and label form edits retain historical data and apply to newly ope
   assert.equal(loadData(store).data.profile.goal, 'gain');
   assert.deepEqual(loadData(store).data.days[key], historical);
   app.navigate('foods');
+  selectFoodsView(app.document, 'Impostazioni');
+  openDisclosure(app.document, 'Etichette e valori nutrizionali');
   assert.ok(app.document.querySelector('.label-form select'), app.document.querySelector('#main').textContent);
   const product = app.document.querySelector('.label-form select');
   product.value = 'protein-pudding-lidl'; product.dispatch('change');
@@ -640,6 +646,36 @@ function pastaAndChickenDiary() {
   return { data, key, lunchId: lunch.id };
 }
 
+function isVisible(node) {
+  if (!node?.isConnected) return false;
+  for (let current = node; current; current = current.parentNode) {
+    if (current.hidden) return false;
+    if (current.parentNode?.tagName === 'DETAILS' && !current.parentNode.open && current.tagName !== 'SUMMARY') return false;
+  }
+  return true;
+}
+
+function selectFoodsView(document, label) {
+  clickText(document.querySelector('.workflow-tabs'), label);
+}
+function openDisclosure(root, label) {
+  const summary = root.querySelectorAll('summary').find(node => node.textContent === label);
+  assert.ok(summary, `Missing disclosure: ${label}`);
+  if (!summary.parentNode.open) summary.click();
+  assert.equal(summary.parentNode.open, true);
+  return summary.parentNode;
+}
+function openFoodPicker(document, mode = 'Cerca') {
+  const picker = document.querySelector('.meal-food-picker');
+  assert.ok(picker);
+  clickText(picker, 'Aggiungi alimento');
+  if (mode !== 'Cerca') clickText(picker, mode);
+}
+function openQuickSwaps(document) {
+  clickText(document.querySelector('#app-dialog'), 'Cambia ricetta');
+  openDisclosure(document.querySelector('#app-dialog'), 'Sostituzioni rapide');
+}
+
 function openMeal(document, data, key, id) {
   const index = data.days[key].meals.findIndex(item => item.id === id);
   document.querySelectorAll('.meal-card')[index].querySelector('.meal-actions button').click();
@@ -651,8 +687,10 @@ test('pasta-to-lentil UI swap shows the lower chicken portion and counts every p
   const store = new MemoryStorage(); saveData(data, store);
   const { document } = await bootApp(t, store);
   openMeal(document, data, key, lunchId);
+  openQuickSwaps(document);
   const select = document.querySelector('.swap-fields select');
   select.value = 'lentil-pasta-lidl'; select.dispatch('change');
+  assert.equal(isVisible(document.querySelector('.meal-editor-view')), true);
   const expected = swapMealFood(original, 'pasta', 'lentil-pasta-lidl');
   const chicken = expected.ingredients.find(item => item.foodId === 'chicken');
   assert.ok(chicken.grams < 170);
@@ -678,8 +716,10 @@ test('manual portion edits clear the previous swap comparison and Cancel writes 
   const initialJSON = store.getItem(STORAGE_KEY);
   const { document } = await bootApp(t, store);
   openMeal(document, data, key, lunchId);
+  openQuickSwaps(document);
   const select = document.querySelector('.swap-fields select');
   select.value = 'lentil-pasta-lidl'; select.dispatch('change');
+  assert.equal(isVisible(document.querySelector('.meal-editor-view')), true);
   assert.equal(document.querySelector('.portion-update').hidden, false);
   const portion = document.querySelector('.edit-ingredients input');
   portion.value = '120'; portion.dispatch('input');
@@ -721,6 +761,8 @@ test('refresh updates only eligible macros, respects overrides and preserves gra
   const store = new MemoryStorage(); saveData(data, store);
   const initialJSON = store.getItem(STORAGE_KEY);
   const { document } = await bootApp(t, store, 'foods');
+  selectFoodsView(document, 'Impostazioni');
+  openDisclosure(document, 'Aggiorna i pasti pianificati');
   document.querySelector('.refresh-panel button').click();
   assert.equal(document.querySelector('#app-dialog').open, true);
   assert.equal(store.getItem(STORAGE_KEY), initialJSON);
@@ -746,6 +788,8 @@ test('refresh cancellation and a later no-op leave storage untouched', async t =
   const store = new MemoryStorage(); saveData(data, store);
   const initialJSON = store.getItem(STORAGE_KEY);
   const { document } = await bootApp(t, store, 'foods');
+  selectFoodsView(document, 'Impostazioni');
+  openDisclosure(document, 'Aggiorna i pasti pianificati');
   document.querySelector('.refresh-panel button').click();
   document.querySelector('.dialog-actions button.secondary').click();
   assert.equal(store.getItem(STORAGE_KEY), initialJSON);
@@ -763,6 +807,8 @@ test('a cross-tab conflict between refresh preview and confirmation cannot repla
   const { data } = refreshFixture();
   const store = new MemoryStorage(); saveData(data, store);
   const { document, window } = await bootApp(t, store, 'foods');
+  selectFoodsView(document, 'Impostazioni');
+  openDisclosure(document, 'Aggiorna i pasti pianificati');
   document.querySelector('.refresh-panel button').click();
   const external = loadData(store).data;
   external.profile.weight = 79;
@@ -789,6 +835,8 @@ test('refresh confirms obsolete reference notes and preserves consumed notes and
   const store = new MemoryStorage(); saveData(data, store);
   const initialJSON = store.getItem(STORAGE_KEY);
   const { document } = await bootApp(t, store, 'foods');
+  selectFoodsView(document, 'Impostazioni');
+  openDisclosure(document, 'Aggiorna i pasti pianificati');
   document.querySelector('.refresh-panel button').click();
   assert.equal(document.querySelector('#app-dialog').open, true);
   assert.equal(store.getItem(STORAGE_KEY), initialJSON);
@@ -818,6 +866,8 @@ test('a failed recalculation cannot apply the partially refreshed copy', async t
   const store = new MemoryStorage(); saveData(data, store);
   const initialJSON = store.getItem(STORAGE_KEY);
   const { document } = await bootApp(t, store, 'foods');
+  selectFoodsView(document, 'Impostazioni');
+  openDisclosure(document, 'Aggiorna i pasti pianificati');
   document.querySelector('.refresh-panel button').click();
   assert.equal(document.querySelector('#app-dialog').open, false);
   assert.equal(store.getItem(STORAGE_KEY), initialJSON);
@@ -848,6 +898,8 @@ test('the food form exposes each verified variant, evidence and user overrides',
   initial.foodOverrides['protein-pudding-lidl'] = { kcal: 94, protein: 13, carbs: 5, fat: 2 };
   const store = new MemoryStorage(); saveData(initial, store);
   const { document } = await bootApp(t, store, 'foods');
+  selectFoodsView(document, 'Impostazioni');
+  openDisclosure(document, 'Etichette e valori nutrizionali');
   const formIds = new Set(document.querySelector('.label-form select').querySelectorAll('option').map(option => option.value));
   for (const id of LIDL_FOOD_IDS) assert.ok(formIds.has(id));
   const cards = document.querySelectorAll('.food-card');
@@ -871,22 +923,28 @@ test('fresh lentil pasta and all four dessert variants are selectable with their
   const store = new MemoryStorage(); saveData(data, store);
   const { document } = await bootApp(t, store);
   openMeal(document, data, key, lunchId);
+  openQuickSwaps(document);
   const carb = document.querySelector('.swap-fields select');
   assert.ok(carb.querySelectorAll('option').some(option => option.value === 'lentil-pasta-lidl-fresh'));
   carb.value = 'lentil-pasta-lidl-fresh'; carb.dispatch('change');
+  assert.equal(isVisible(document.querySelector('.meal-editor-view')), true);
   const freshPortion = document.querySelectorAll('.edit-ingredients input').find(input => input.attributes['aria-label'] === `${getFood('lentil-pasta-lidl-fresh').name}, grammi`);
   assert.ok(freshPortion && freshPortion.valueAsNumber > 0);
   document.querySelector('.dialog-actions button.secondary').click();
   const breakfast = data.days[key].meals.find(item => item.slot === 'breakfast');
   openMeal(document, data, key, breakfast.id);
   const alternatives = mealAlternatives(breakfast, data.days[key].targets);
-  const variantSelect = document.querySelector('.dialog-content select');
+  clickText(document.querySelector('#app-dialog'), 'Cambia ricetta');
   const desserts = LIDL_FOOD_IDS.map(id => getFood(id)).filter(item => item.group === 'breakfast');
   assert.equal(desserts.length, 4);
   for (const dessert of desserts) {
     const index = alternatives.findIndex(item => item.ingredients.some(ingredient => ingredient.foodId === dessert.id));
     assert.ok(index >= 0, dessert.id);
-    variantSelect.value = String(index); variantSelect.dispatch('change');
+    if (document.querySelector('.recipe-chooser').hidden) clickText(document.querySelector('#app-dialog'), 'Cambia ricetta');
+    const search = controlWithLabel(document, 'input', 'Cerca una ricetta per il pasto');
+    search.value = alternatives[index].title; search.dispatch('input');
+    const choice = controlWithLabel(document, 'button', `Scegli ricetta: ${alternatives[index].title}`);
+    assert.ok(choice, dessert.id); choice.click();
     const portion = document.querySelectorAll('.edit-ingredients input').find(input => input.attributes['aria-label'] === `${dessert.name}, grammi`);
     assert.ok(portion, `${dessert.id}: ${JSON.stringify(document.querySelectorAll('.edit-ingredients input').map(input => input.attributes['aria-label']))}`);
     assert.equal(portion.valueAsNumber, dessert.label.packGrams);
@@ -911,8 +969,10 @@ test('successive UI swaps preserve protein while rebalancing the counted bread',
   let sawBread = false;
   for (const id of ['lentil-pasta-lidl', 'lentil-pasta-lidl-fresh', 'rice', 'pasta']) {
     openMeal(document, current, key, lunchId);
+    openQuickSwaps(document);
     const control = document.querySelector('.swap-fields select');
     control.value = id; control.dispatch('change');
+    assert.equal(isVisible(document.querySelector('.meal-editor-view')), true);
     document.querySelector('.dialog-actions button.primary').click();
     current = loadData(store).data;
     const meal = current.days[key].meals.find(item => item.id === lunchId);
@@ -931,6 +991,8 @@ test('a quota failure during refresh preserves stored data and displays an unsav
   const store = new MemoryStorage(); saveData(data, store);
   const initialJSON = store.getItem(STORAGE_KEY);
   const { document } = await bootApp(t, store, 'foods');
+  selectFoodsView(document, 'Impostazioni');
+  openDisclosure(document, 'Aggiorna i pasti pianificati');
   document.querySelector('.refresh-panel button').click();
   store.setItem = () => { throw new Error('QuotaExceededError'); };
   document.querySelector('.dialog-actions button.primary').click();
@@ -2174,7 +2236,9 @@ test('personal product can be saved, added, consumed and deleted without changin
   const key = todayKey(), initial = generatedDiary(key), store = new MemoryStorage();
   saveData(initial, store);
   const { document, navigate } = await bootApp(t, store, 'foods');
+  selectFoodsView(document, 'Porzioni');
   const buttonWith = text => document.querySelectorAll('button').find(b => b.textContent === text);
+  buttonWith('Nuova porzione').click();
   buttonWith('Inserisci prodotto a mano').click();
   const form = document.querySelector('.portion-editor');
   const inputs = form.querySelectorAll('input');
@@ -2194,7 +2258,7 @@ test('personal product can be saved, added, consumed and deleted without changin
   assert.ok(Math.abs(updated.macros.kcal - lunch.macros.kcal - 133) < 1e-7);
   navigate('today');
   const card = document.querySelectorAll('.meal-card').find(c => c.textContent.includes('Mousse test'));
-  card.querySelectorAll('button').find(b => b.textContent === 'Modifica porzioni e alternative').click();
+  card.querySelectorAll('button').find(b => b.textContent === 'Modifica pasto').click();
   const quantity = document.querySelectorAll('.edit-ingredients input').at(-1); quantity.value = '150'; quantity.dispatch('input');
   buttonWith('Salva questo pasto').click();
   const editedCard = document.querySelectorAll('.meal-card').find(c => c.textContent.includes('Mousse test'));
@@ -2263,6 +2327,7 @@ test('meal composer searches any catalog food, removes base ingredients and save
   while (document.querySelector('.remove-ingredient')) document.querySelector('.remove-ingredient').click();
   composerButton(document, 'Salva questo pasto').click();
   assert.equal(document.querySelector('#app-dialog').open, true);
+  openFoodPicker(document);
   fillComposer(document, '.meal-food-picker input[type="search"]', 'pollo');
   assert.ok(document.querySelectorAll('.picker-result').length >= 1);
   document.querySelector('.picker-result').click();
@@ -2283,7 +2348,7 @@ test('meal composer saves manual foods and reusable portions together, including
   const store = new MemoryStorage(); saveData(initial, store);
   const { document } = await bootApp(t, store);
   openComposer(document);
-  composerButton(document, 'Inserisci un alimento a mano').click();
+  openFoodPicker(document, 'A mano');
   fillComposer(document, '.picker-manual-form input', 'Bevanda personale');
   const unit = document.querySelector('.picker-manual-form select'); unit.value = 'ml'; unit.dispatch('change');
   for (const [metric, value] of Object.entries({ kcal: 45, protein: 3, carbs: 5, fat: 1.5 })) {
@@ -2308,6 +2373,7 @@ test('meal composer saves manual foods and reusable portions together, including
   assertMacrosClose(result.days[key].meals[0].macros, sumMacros([initial.days[key].meals[0].macros, { kcal:112.5, protein:7.5, carbs:12.5, fat:3.75 }]));
   assert.deepEqual(parseBackup(exportBackup(result)), result);
   openComposer(document);
+  openFoodPicker(document);
   fillComposer(document, '.meal-food-picker input[type="search"]', 'bevanda personale');
   assert.equal(document.querySelectorAll('.picker-result').length, 1);
 });
@@ -2317,7 +2383,7 @@ test('cancelling a free meal composition never saves pending personal foods', as
   const store = new MemoryStorage(); saveData(initial, store);
   const { document } = await bootApp(t, store);
   openComposer(document);
-  composerButton(document, 'Inserisci un alimento a mano').click();
+  openFoodPicker(document, 'A mano');
   fillComposer(document, '.picker-manual-form input', 'Prova');
   for (const metric of ['kcal', 'protein', 'carbs', 'fat']) fillComposer(document, `input[data-metric="${metric}"]`, '0');
   document.querySelector('.picker-manual-form').dispatch('submit');
@@ -2332,6 +2398,7 @@ test('invalid ingredient quantities cannot be erased by adding another ingredien
   const { document } = await bootApp(t, store);
   openComposer(document);
   fillComposer(document, '.edit-ingredients input', '');
+  openFoodPicker(document);
   fillComposer(document, '.meal-food-picker input[type="search"]', 'pollo');
   document.querySelector('.picker-result').click();
   document.querySelector('.picker-amount-form').dispatch('submit');
@@ -2347,6 +2414,7 @@ test('usual catalog quantities are proposed again while one-off amounts leave th
   assert.equal(document.querySelector('.meal-card h3'), null);
   openComposer(document);
   assert.ok(!document.querySelector('#app-dialog').textContent.includes('Nome del pasto'));
+  openFoodPicker(document);
   fillComposer(document, '.meal-food-picker input[type="search"]', 'pollo');
   document.querySelector('.picker-result').click();
   fillComposer(document, '.picker-amount-form input[type="number"]', '175');
@@ -2356,6 +2424,7 @@ test('usual catalog quantities are proposed again while one-off amounts leave th
   composerButton(document, 'Salva questo pasto').click();
   assert.deepEqual(loadData(store).data.usualQuantities.chicken, { grams: 175, unit: 'g' });
   openComposer(document);
+  openFoodPicker(document);
   fillComposer(document, '.meal-food-picker input[type="search"]', 'pollo');
   document.querySelector('.picker-result').click();
   assert.equal(document.querySelector('.picker-amount-form input[type="number"]').valueAsNumber, 175);
@@ -2394,6 +2463,7 @@ test('barcode lookup adds a snapshot and reuses its usual quantity without a sec
     return { ok: true, json: async () => barcodeFixture() };
   } });
   openComposer(document);
+  openFoodPicker(document, 'Codice a barre');
   fillComposer(document, '.picker-barcode-form input', '036000291452');
   document.querySelector('.picker-barcode-form').dispatch('submit');
   await new Promise(resolve => setImmediate(resolve));
@@ -2407,6 +2477,7 @@ test('barcode lookup adds a snapshot and reuses its usual quantity without a sec
   assert.equal(saved.days[key].meals[0].ingredients.at(-1).foodSnapshot.barcode, '036000291452');
   assert.equal(saved.personalPortions[0].grams, 250);
   openComposer(document);
+  openFoodPicker(document, 'Codice a barre');
   fillComposer(document, '.picker-barcode-form input', '036000291452');
   document.querySelector('.picker-barcode-form').dispatch('submit');
   await new Promise(resolve => setImmediate(resolve));
@@ -2422,6 +2493,7 @@ test('closing the meal editor aborts barcode lookup and ignores late results', a
     return new Promise(resolve => { resolveRequest = resolve; });
   } });
   openComposer(document);
+  openFoodPicker(document, 'Codice a barre');
   fillComposer(document, '.picker-barcode-form input', '036000291452');
   document.querySelector('.picker-barcode-form').dispatch('submit');
   assert.equal(signal.aborted, false);
@@ -2441,6 +2513,7 @@ test('a barcode with missing nutrients opens an editor and cannot be added befor
   } });
   openComposer(document);
   const count = document.querySelectorAll('.edit-ingredient').length;
+  openFoodPicker(document, 'Codice a barre');
   fillComposer(document, '.picker-barcode-form input', '036000291452');
   document.querySelector('.picker-barcode-form').dispatch('submit');
   await new Promise(resolve => setImmediate(resolve));
@@ -2462,6 +2535,7 @@ test('closing the meal editor stops the barcode camera stream and decoder', asyn
   } } });
   t.after(() => { for (const [key, descriptor] of Object.entries(previous)) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]; } });
   openComposer(document);
+  openFoodPicker(document, 'Codice a barre');
   composerButton(document, 'Inquadra codice a barre').click();
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(acquired, 1);
@@ -2493,11 +2567,17 @@ test('recipe library paginates 200 bases and editing a searched recipe preserves
   assert.equal(library.querySelectorAll('.recipe-card').length, 1);
   clickText(library, 'Modifica ricetta');
   const editor = library.querySelector('.recipe-editor');
+  assert.equal(library.querySelector('.library-view').hidden, true);
+  assert.equal(editor.hidden, false);
   const name = controlWithLabel(editor, 'input', 'Nome della ricetta');
+  assert.equal(document.activeElement, name);
   name.value = 'Il mio chili'; name.dispatch('input');
   const amount = editor.querySelector('.recipe-ingredients input'); amount.value = '180'; amount.dispatch('input');
   assert.equal(editor.querySelector('.picker-remember'), null, 'Recipe edits must not silently overwrite habitual portions');
   clickText(editor, 'Salva ricetta');
+  assert.equal(library.querySelector('.library-view').hidden, false);
+  assert.equal(editor.hidden, true);
+  assert.equal(document.activeElement, library.querySelector('input[type="search"]'));
   const result = loadData(store).data;
   assert.deepEqual(result.days, initial.days);
   assert.equal(result.personalRecipes.length, 1);
@@ -2548,6 +2628,8 @@ test('macro percentages validate totals and fitting preserves consumed and skipp
   current.consumed[eaten.id] = { consumedAt: new Date().toISOString(), meal: clone(eaten) };
   current.skipped = [skipped.id]; saveData(initial, store);
   const { document } = await bootApp(t, store, 'foods');
+  selectFoodsView(document, 'Impostazioni');
+  openDisclosure(document, 'Distribuzione dei macro');
   clickText(document, 'Modifica percentuali');
   const dialog = document.querySelector('#app-dialog');
   const lunchProtein = controlWithLabel(dialog, 'input', 'Pranzo: proteine percentuale');
@@ -2580,12 +2662,15 @@ test('macro percentages validate totals and fitting preserves consumed and skipp
 test('editing a habitual portion persists its default but permits a different amount in one meal', async t => {
   const key = todayKey(), initial = generatedDiary(key), store = new MemoryStorage(); saveData(initial, store);
   const { document, navigate } = await bootApp(t, store, 'foods');
+  selectFoodsView(document, 'Porzioni');
+  openDisclosure(document, 'Quantità abituali degli alimenti');
   const panel = document.querySelector('.usual-quantities-panel');
   const choice = panel.querySelector('select'); choice.value = 'chicken'; choice.dispatch('change');
   const amount = panel.querySelector('input'); amount.value = '185'; amount.dispatch('input');
   panel.querySelector('form').dispatch('submit');
   assert.deepEqual(loadData(store).data.days, initial.days);
   navigate('today'); openComposer(document);
+  openFoodPicker(document);
   fillComposer(document, '.meal-food-picker input[type="search"]', 'Petto di pollo');
   document.querySelector('.picker-result').click();
   assert.equal(document.querySelector('.picker-amount-form input').valueAsNumber, 185);
@@ -2595,6 +2680,7 @@ test('editing a habitual portion persists its default but permits a different am
   composerButton(document, 'Salva questo pasto').click();
   assert.equal(loadData(store).data.days[key].meals[0].ingredients.at(-1).grams, 140);
   navigate('foods');
+  openDisclosure(document, 'Quantità abituali degli alimenti');
   const savedChoice = document.querySelector('.usual-quantities-panel select'); savedChoice.value = 'chicken'; savedChoice.dispatch('change');
   assert.equal(document.querySelector('.usual-quantities-panel input').valueAsNumber, 185);
 });
@@ -2605,6 +2691,7 @@ test('a personal portion defaults to automatic fitting and keeps its reusable ba
   initial.personalPortions = [{ id: 'personal-auto-mousse', food, grams: 175 }];
   saveData(initial, store);
   const { document } = await bootApp(t, store, 'foods');
+  selectFoodsView(document, 'Porzioni');
   clickText(document, 'Aggiungi a un pasto');
   const dialog = document.querySelector('#app-dialog');
   const lunch = initial.days[key].meals.find(item => item.slot === 'lunch');
@@ -2686,6 +2773,8 @@ test('meal oil editing rejects nonquarters and saves 1.25 tablespoons as 16.875 
 test('habitual oil quantities validate quarter steps and the picker reuses the exact stored amount', async t => {
   const key = todayKey(), initial = oilDiary(), store = new MemoryStorage(); saveData(initial, store);
   const { document, navigate } = await bootApp(t, store, 'foods');
+  selectFoodsView(document, 'Porzioni');
+  openDisclosure(document, 'Quantità abituali degli alimenti');
   let panel = document.querySelector('.usual-quantities-panel');
   const choice = panel.querySelector('select'); choice.value = 'olive-oil'; choice.dispatch('change');
   const input = panel.querySelector('input');
@@ -2695,6 +2784,7 @@ test('habitual oil quantities validate quarter steps and the picker reuses the e
   input.value = '1.25'; input.dispatch('input'); panel.querySelector('form').dispatch('submit');
   assert.deepEqual(loadData(store).data.usualQuantities['olive-oil'], { grams: 16.875, unit: 'g' });
   navigate('today'); openComposer(document);
+  openFoodPicker(document);
   fillComposer(document, '.meal-food-picker input[type="search"]', 'Olio extravergine');
   document.querySelector('.picker-result').click();
   const pickerAmount = document.querySelector('.picker-amount-form input');
@@ -2742,6 +2832,7 @@ for (const [unit, factor] of [['g', 13.5], ['ml', 15]]) {
     initial.personalPortions = [{ id: `personal-oil-${unit}`, food, grams: factor }];
     saveData(initial, store);
     const { document, navigate } = await bootApp(t, store, 'foods');
+    selectFoodsView(document, 'Porzioni');
     clickText(document.querySelector('.personal-portions'), 'Modifica');
     const input = document.querySelectorAll('.portion-editor input[type="number"]').at(-1);
     assert.equal(input.valueAsNumber, 1);
@@ -2756,6 +2847,7 @@ for (const [unit, factor] of [['g', 13.5], ['ml', 15]]) {
     assert.deepEqual(portion.food, food);
     assert.match(document.querySelector('.personal-portions').textContent, /1,25 cucchiai/);
     navigate('today'); openComposer(document);
+    openFoodPicker(document);
     fillComposer(document, '.meal-food-picker input[type="search"]', food.name);
     document.querySelector('.picker-result').click();
     const picked = document.querySelector('.picker-amount-form input');
@@ -2769,3 +2861,189 @@ for (const [unit, factor] of [['g', 13.5], ['ml', 15]]) {
     assertMacrosClose(saved.macros, mealFromIngredients(saved).macros);
   });
 }
+
+test('food library mounts only the selected section and keeps optional settings collapsed', async t => {
+  const initial = generatedDiary(todayKey()), store = new MemoryStorage(); saveData(initial, store);
+  const { document } = await bootApp(t, store, 'foods');
+  const activeTab = () => document.querySelectorAll('.workflow-tabs button').filter(button => button.attributes['aria-pressed'] === 'true').map(button => button.textContent);
+  assert.deepEqual(activeTab(), ['Ricette']);
+  assert.ok(isVisible(document.querySelector('.recipes-panel')));
+  assert.equal(document.querySelector('.portions-panel'), null);
+  assert.equal(document.querySelector('.label-form'), null);
+  selectFoodsView(document, 'Porzioni');
+  assert.deepEqual(activeTab(), ['Porzioni']);
+  assert.equal(document.querySelector('.recipes-panel'), null);
+  const portions = document.querySelector('.portions-panel');
+  assert.ok(isVisible(portions.querySelector('.library-view')));
+  assert.equal(isVisible(portions.querySelector('.portion-create')), false);
+  assert.equal(isVisible(portions.querySelector('.portion-editor-view')), false);
+  assert.equal(isVisible(document.querySelector('.usual-quantities-panel')), false);
+  selectFoodsView(document, 'Impostazioni');
+  assert.deepEqual(activeTab(), ['Impostazioni']);
+  assert.equal(document.querySelector('.portions-panel'), null);
+  assert.equal(document.querySelectorAll('.settings-group').length, 4);
+  assert.ok(document.querySelectorAll('.settings-group').every(group => !group.open));
+  assert.equal(isVisible(document.querySelector('.label-form')), false);
+  openDisclosure(document, 'Etichette e valori nutrizionali');
+  assert.equal(isVisible(document.querySelector('.label-form')), true);
+  assert.equal(isVisible(document.querySelector('.refresh-panel')), false);
+  assert.deepEqual(loadData(store).data, initial);
+  assert.equal(store.writes, 1);
+});
+
+test('meal recipe search is a focused separate step and returning keeps edited ingredient quantities', async t => {
+  const { data: initial, key, lunchId } = pastaAndChickenDiary();
+  const store = new MemoryStorage(); saveData(initial, store);
+  const { document } = await bootApp(t, store);
+  const index = initial.days[key].meals.findIndex(item => item.id === lunchId);
+  const opener = document.querySelectorAll('.meal-card')[index].querySelector('.meal-actions button');
+  assert.equal(opener.textContent, 'Modifica pasto');
+  opener.focus(); opener.click();
+  const dialog = document.querySelector('#app-dialog');
+  const mealEditor = dialog.querySelector('.meal-editor-view');
+  const chooser = dialog.querySelector('.recipe-chooser');
+  assert.equal(isVisible(mealEditor), true);
+  assert.equal(isVisible(chooser), false);
+  assert.equal(dialog.querySelector('optgroup'), null, 'The editor must not expose the full recipe library in a select');
+  const grams = mealEditor.querySelector('.edit-ingredients input');
+  grams.value = '120'; grams.dispatch('input');
+  clickText(dialog, 'Cambia ricetta');
+  assert.equal(isVisible(mealEditor), false);
+  assert.equal(isVisible(chooser), true);
+  const search = controlWithLabel(chooser, 'input', 'Cerca una ricetta per il pasto');
+  assert.equal(document.activeElement, search);
+  assert.equal(controlWithLabel(chooser, 'select', 'Ricette per pasto').value, 'lunch');
+  assert.ok(chooser.querySelectorAll('.picker-result').length <= 12);
+  search.value = 'Chili di tacchino e zucca'; search.dispatch('input');
+  assert.equal(chooser.querySelectorAll('.picker-result').length, 1);
+  assert.equal(chooser.querySelector('.picker-result').attributes['aria-label'], 'Scegli ricetta: Chili di tacchino e zucca');
+  clickText(chooser, '← Torna agli ingredienti');
+  assert.equal(isVisible(chooser), false);
+  assert.equal(isVisible(mealEditor), true);
+  assert.equal(mealEditor.querySelector('.edit-ingredients input'), grams);
+  assert.equal(grams.valueAsNumber, 120);
+  assert.equal(document.activeElement.textContent, 'Cambia ricetta');
+  clickText(mealEditor, 'Annulla');
+  assert.equal(dialog.open, false);
+  assert.equal(document.activeElement, opener);
+  assert.deepEqual(loadData(store).data, initial);
+});
+
+test('ingredient picker exposes one focused step at a time and adding returns to the compact launcher', async t => {
+  const key = todayKey(), initial = generatedDiary(key), store = new MemoryStorage(); saveData(initial, store);
+  const { document } = await bootApp(t, store);
+  openComposer(document);
+  const picker = document.querySelector('.meal-food-picker');
+  const launcher = picker.querySelector('button');
+  assert.equal(launcher.textContent, 'Aggiungi alimento');
+  assert.equal(launcher.attributes['aria-expanded'], 'false');
+  assert.equal(isVisible(picker.querySelector('.picker-chooser')), false);
+  assert.equal(picker.querySelectorAll('.picker-result').length, 0);
+  openFoodPicker(document);
+  const search = picker.querySelector('input[type="search"]');
+  assert.equal(document.activeElement, search);
+  assert.equal(launcher.attributes['aria-expanded'], 'true');
+  assert.equal(isVisible(picker.querySelector('.picker-barcode')), false);
+  assert.equal(picker.querySelector('.picker-manual-form'), null);
+  search.value = 'Petto di pollo'; search.dispatch('input');
+  assert.equal(picker.querySelectorAll('.picker-result').length, 1);
+  picker.querySelector('.picker-result').click();
+  const amount = picker.querySelector('.picker-amount-form input');
+  assert.equal(document.activeElement, amount);
+  assert.equal(isVisible(picker.querySelector('.picker-search-panel')), false);
+  assert.equal(isVisible(picker.querySelector('.picker-modes')), false);
+  assert.equal(isVisible(picker.querySelector('.picker-barcode')), false);
+  clickText(picker, 'Torna alla ricerca');
+  assert.equal(picker.querySelector('.picker-amount-form'), null);
+  assert.equal(isVisible(picker.querySelector('.picker-search-panel')), true);
+  assert.equal(document.activeElement, search);
+  clickText(picker, 'Codice a barre');
+  assert.equal(isVisible(picker.querySelector('.picker-barcode')), true);
+  assert.equal(isVisible(picker.querySelector('.picker-search-panel')), false);
+  assert.equal(document.activeElement, picker.querySelector('.picker-barcode-form input'));
+  clickText(picker, 'A mano');
+  assert.equal(isVisible(picker.querySelector('.picker-barcode')), false);
+  assert.ok(isVisible(picker.querySelector('.picker-manual-form')));
+  assert.equal(document.activeElement, picker.querySelector('.picker-manual-form input'));
+  clickText(picker, 'Annulla aggiunta');
+  assert.equal(picker.querySelector('.picker-manual-form'), null);
+  assert.equal(document.activeElement, search);
+  picker.querySelector('.picker-result').click();
+  fillComposer(document, '.picker-amount-form input', '175');
+  picker.querySelector('.picker-amount-form').dispatch('submit');
+  assert.equal(isVisible(picker.querySelector('.picker-chooser')), false);
+  assert.equal(isVisible(launcher), true);
+  assert.equal(launcher.attributes['aria-expanded'], 'false');
+  assert.equal(document.activeElement, launcher);
+  assert.equal(picker.querySelector('.picker-amount-form'), null);
+  assert.equal(document.querySelectorAll('.edit-ingredient').length, initial.days[key].meals[0].ingredients.length + 1);
+  assert.deepEqual(loadData(store).data, initial);
+  composerButton(document, 'Annulla').click();
+  assert.deepEqual(loadData(store).data, initial);
+});
+
+test('portion creation and recipe editing replace their libraries and cancelling discards drafts', async t => {
+  const initial = generatedDiary(todayKey()), store = new MemoryStorage(); saveData(initial, store);
+  const { document } = await bootApp(t, store, 'foods');
+  let recipes = document.querySelector('.recipes-panel');
+  clickText(recipes, 'Nuova ricetta');
+  assert.equal(isVisible(recipes.querySelector('.library-view')), false);
+  assert.equal(isVisible(recipes.querySelector('.recipe-editor')), true);
+  const name = controlWithLabel(recipes, 'input', 'Nome della ricetta');
+  assert.equal(document.activeElement, name);
+  name.value = 'Ricetta da annullare'; name.dispatch('input');
+  clickText(recipes, 'Annulla modifica ricetta');
+  assert.equal(isVisible(recipes.querySelector('.library-view')), true);
+  assert.equal(isVisible(recipes.querySelector('.recipe-editor')), false);
+  selectFoodsView(document, 'Porzioni');
+  const portions = document.querySelector('.portions-panel');
+  clickText(portions, 'Nuova porzione');
+  assert.equal(isVisible(portions.querySelector('.library-view')), false);
+  assert.equal(isVisible(portions.querySelector('.portion-create')), true);
+  assert.equal(document.activeElement, portions.querySelector('.barcode-search input'));
+  clickText(portions, 'Inserisci prodotto a mano');
+  assert.equal(isVisible(portions.querySelector('.portion-create')), false);
+  assert.equal(isVisible(portions.querySelector('.portion-editor-view')), true);
+  const portionName = portions.querySelector('.portion-editor input');
+  assert.equal(document.activeElement, portionName);
+  portionName.value = 'Porzione da annullare'; portionName.dispatch('input');
+  clickText(portions, 'Annulla');
+  assert.equal(isVisible(portions.querySelector('.library-view')), true);
+  assert.equal(isVisible(portions.querySelector('.portion-create')), false);
+  assert.equal(isVisible(portions.querySelector('.portion-editor-view')), false);
+  assert.equal(document.activeElement.textContent, 'Nuova porzione');
+  assert.deepEqual(loadData(store).data, initial);
+  assert.equal(store.writes, 1);
+});
+
+test('meal recipe chooser keeps distinct personal recipes with the same name selectable', async t => {
+  const { data: initial, key, lunchId } = pastaAndChickenDiary();
+  initial.personalRecipes = [
+    { id: 'recipe-user-same-name-chicken', name: 'La mia ricetta omonima', slot: 'lunch', ingredients: [{ foodId: 'chicken', grams: 150 }] },
+    { id: 'recipe-user-same-name-rice', name: 'La mia ricetta omonima', slot: 'lunch', ingredients: [{ foodId: 'rice', grams: 100 }] },
+  ];
+  const store = new MemoryStorage(); saveData(initial, store);
+  const { document } = await bootApp(t, store);
+  openMeal(document, initial, key, lunchId);
+  clickText(document.querySelector('#app-dialog'), 'Cambia ricetta');
+  const search = controlWithLabel(document, 'input', 'Cerca una ricetta per il pasto');
+  search.value = 'La mia ricetta omonima'; search.dispatch('input');
+  const choices = document.querySelectorAll('.recipe-choice-list .picker-result');
+  assert.equal(choices.length, 2, 'Names must not collapse distinct stored recipes');
+  assert.ok(choices.every(choice => isVisible(choice)));
+  choices[1].click();
+  assert.equal(isVisible(document.querySelector('.recipe-chooser')), false);
+  const rows = document.querySelectorAll('.edit-ingredients .edit-ingredient');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].querySelector('label').textContent, getFood('rice').name);
+  assert.deepEqual(loadData(store).data, initial, 'Choosing the second recipe still edits only the draft');
+  composerButton(document, 'Salva questo pasto').click();
+  const saved = loadData(store).data;
+  const lunch = saved.days[key].meals.find(item => item.id === lunchId);
+  assert.equal(lunch.title, 'La mia ricetta omonima');
+  assert.equal(lunch.ingredients.length, 1);
+  assert.equal(lunch.ingredients[0].foodId, 'rice');
+  assert.deepEqual(saved.personalRecipes, initial.personalRecipes);
+  assert.deepEqual(saved.days[key].consumed, {});
+  assert.deepEqual(saved.days[key].meals.filter(item => item.id !== lunchId), initial.days[key].meals.filter(item => item.id !== lunchId));
+});

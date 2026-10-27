@@ -40,9 +40,9 @@ La ricerca consulta [Open Food Facts](https://world.openfoodfacts.org), con attr
 
 ## Ricette base e distribuzione dei macro
 
-In **Alimenti → Le mie ricette base** trovi le 195 ricette di [Cibo Sano](https://gabrirosa.github.io/cibo-sano/) e cinque basi del piano Pasti. Puoi cercarle per nome o ingrediente, crearne di nuove e modificare ingredienti e dosi, anche tramite codice a barre. Il salvataggio aggiorna la base personale; i pasti già inseriti nel diario mantengono la propria copia. **Le mie quantità abituali** permette di cambiare la porzione proposta per un alimento, lasciando libera la quantità usata ogni volta.
+In **Alimenti → Ricette** trovi le 195 ricette di [Cibo Sano](https://gabrirosa.github.io/cibo-sano/) e cinque basi del piano Pasti. Puoi cercarle per nome o ingrediente, crearne di nuove e modificare ingredienti e dosi, anche tramite codice a barre. Il salvataggio aggiorna la base personale; i pasti già inseriti nel diario mantengono la propria copia. **Alimenti → Porzioni → Quantità abituali degli alimenti** permette di cambiare la porzione proposta per un alimento, lasciando libera la quantità usata ogni volta.
 
-**I macro nei tuoi pasti** assegna percentuali distinte di proteine, carboidrati e grassi ai quattro pasti. Ogni colonna deve totalizzare il 100%. Il salvataggio imposta il giorno selezionato e il riferimento dei nuovi giorni. **Adatta i pasti da mangiare** mostra un’anteprima e applica le quantità dopo la conferma. Puoi aprire gli stessi controlli anche da Oggi.
+**Alimenti → Impostazioni → Distribuzione dei macro** assegna percentuali distinte di proteine, carboidrati e grassi ai quattro pasti. Ogni colonna deve totalizzare il 100%. Il salvataggio imposta il giorno selezionato e il riferimento dei nuovi giorni. **Adatta i pasti da mangiare** mostra un’anteprima e applica le quantità dopo la conferma. Puoi aprire gli stessi controlli anche da Oggi.
 
 **Usa nel giorno** calcola le dosi della ricetta per il pasto scelto. Il calcolo sottrae i macro già consumati dall’obiettivo giornaliero e ripartisce il residuo tra i pasti ancora da mangiare secondo le percentuali. Le quote di pasti saltati o assenti vengono redistribuite; se tutte le quote residue di un macro sono zero, il residuo è diviso equamente. L’anteprima mostra obiettivo, risultato e scostamento.
 
@@ -51,6 +51,14 @@ In **Alimenti → Le mie ricette base** trovi le 195 ricette di [Cibo Sano](http
 [base-recipes.js](src/base-recipes.js) conserva il catalogo Cibo Sano del 14 ottobre 2026, gli ingredienti per porzione e i riferimenti delle fonti. I dati CoFID sono Crown copyright, distribuiti con [Open Government Licence v3.0](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/). Le voci equivalenti del catalogo Pasti usano i valori e le etichette personali correnti. Gli altri alimenti conservano una copia dei valori originali. Tre voci di zucchero CoFID espresse come equivalenti monosaccaridici sono convertite da 105 a 100 g di carboidrati; la provenienza registra la conversione.
 
 I campi facoltativi `personalRecipes` e `mealDistribution` restano nello schema 1 e sono inclusi nei backup. Ogni giorno può conservare la propria distribuzione. I vecchi backup rimangono importabili senza aggiungere ricette o percentuali ai dati storici.
+
+## Gestione dei pasti
+
+Il diario apre **Modifica pasto** con gli ingredienti e le quantità del pasto selezionato. **Aggiungi alimento** apre una modalità alla volta: ricerca, codice a barre oppure inserimento manuale. I risultati compaiono dopo la ricerca; la scelta di un alimento apre il campo quantità. Dopo l’aggiunta si torna agli ingredienti. Le aggiunte restano una bozza fino a **Salva questo pasto**.
+
+**Cambia ricetta** apre una ricerca per nome o ingrediente, inizialmente filtrata sul pasto corrente. Le ricette personali prevalgono sulle alternative omonime del piano. La scelta torna agli ingredienti con le dosi adattate ai macro; **Adatta quantità ai macro** permette di ricalcolare la composizione corrente. Le sostituzioni rapide e i dettagli delle quantità si aprono su richiesta.
+
+**Alimenti** separa Ricette, Porzioni e Impostazioni. La modifica di una ricetta o porzione nasconde temporaneamente la libreria; annullare torna all’elenco senza salvare la bozza. Il riferimento per questa progressione è il flusso di [Cibo Sano](https://gabrirosa.github.io/cibo-sano/), nei moduli `diary-ui.js` e `kitchen-ui.js`. Non cambia il formato dei dati o lo storico dei pasti.
 
 ## Olio in cucchiai
 

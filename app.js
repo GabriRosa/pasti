@@ -1,11 +1,11 @@
 import { quantitySpec, toDisplayAmount, toStoredAmount, formatFoodAmount, normalizeOilIngredients, quantizeFoodAmount } from './src/food-measures.js?v=20261027-oil';
 import { BASE_RECIPES, BASE_RECIPE_FOODS } from './src/base-recipes.js?v=20261027-recipes';
-import { renderRecipeLibrary } from './src/recipes-ui.js?v=20261027-oil';
+import { renderRecipeLibrary } from './src/recipes-ui.js?v=20261027-simple-meals';
 import { DEFAULT_MEAL_DISTRIBUTION, validateMealDistribution, remainingMealTargets, fitRecipeIngredients } from './src/recipe-fitting.js?v=20261027-oil';
 import { foodQuantityKey, usualFoodQuantity } from './src/food-quantities.js?v=20261027-barcode-quantities';
-import { createMealFoodPicker } from './src/meal-food-picker.js?v=20261027-oil';
+import { createMealFoodPicker } from './src/meal-food-picker.js?v=20261027-simple-meals';
 import { MACRO_CHART_KEYS, macroGrams, macroChartSvg } from './src/macro-chart.js?v=20261027-neutral';
-import { renderPortions } from './src/portions-ui.js?v=20261027-oil';
+import { renderPortions } from './src/portions-ui.js?v=20261027-simple-meals';
 import { ACTIVITY_LEVELS, calculateTargets, sumMacros } from './src/nutrition.js?v=20261027-neutral';
 import { FOODS, LIDL_FOOD_IDS, getFood, getIngredientFood, ingredientMacros } from './src/foods.js?v=20261027-neutral';
 import { createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } from './src/planner.js?v=20261027-oil';
@@ -35,6 +35,8 @@ let storageConflict = false;
 let selectedDate = localDate();
 let page = 'today';
 let labelFoodId = 'lentil-pasta-lidl';
+let foodsView = 'recipes';
+const openFoodSettings = new Set();
 let toastTimer;
 let returnFocus;
 let healthRenderQueued = false;
@@ -601,7 +603,7 @@ function renderMeal(meal, day, index) {
       ['protein', 'carbs', 'fat'].some(key => Math.abs(ingredientTotals[key] - displayMeal.macros[key]) > 0.1) &&
         h('small', { class: 'ingredient-label-note' }, 'Ingredienti: etichette attuali. Il totale e il grafico conservano i valori salvati del pasto.'),
       h('div', { class: 'meal-actions' },
-        !eaten && !skipped && button('Modifica porzioni e alternative', () => { try { editMeal(meal); } catch (error) { notify(error.message, true); } }, 'text-button'),
+        !eaten && !skipped && button('Modifica pasto', () => { try { editMeal(meal); } catch (error) { notify(error.message, true); } }, 'text-button'),
         meal.slot === 'preworkout' && !eaten && button(skipped ? 'Aggiungi al piano' : 'Salta spuntino', () => updateDay(target => { target.skipped = skipped ? target.skipped.filter(id => id !== meal.id) : [...target.skipped, meal.id]; }), 'text-button muted'),
         eaten ? button('Annulla registrazione', () => { void undoConsumedMeal(meal); }, 'button secondary small') : !skipped && button('Segna mangiato', () => updateDay(target => { target.consumed[meal.id] = { consumedAt: new Date().toISOString(), meal: clone(meal) }; }), 'button primary small', { disabled: future, title: future ? 'Potrai registrare il pasto quando arriva questa data.' : 'Registra questo pasto nel diario' })),
       future && !eaten && !skipped && h('p', { class: 'meal-note future-note' }, 'Stai pianificando un giorno futuro. La registrazione sarà disponibile da quella data.')));
@@ -675,7 +677,7 @@ function editMeal(original) {
           : draft.ingredients.find(ingredient => ids.includes(ingredient.foodId));
         if (!current) continue;
         controls.append(field(label, h('select', { onchange: event => {
-          try { const before = clone(draft); draft = swapMealFood(draft, current.foodId, event.target.value, data.foodOverrides); rebuild(); showAdaptation(before); }
+          try { const before = clone(draft); draft = swapMealFood(draft, current.foodId, event.target.value, data.foodOverrides); rebuild(); showAdaptation(before); backToMeal(); }
           catch (error) { errors.textContent = error.message; }
         } }, ...ids.map(id => h('option', { value: id, selected: id === current.foodId }, getFood(id).name)))));
       }
@@ -696,7 +698,7 @@ function editMeal(original) {
       } });
       const habitual = usualFoodQuantity(ingredient.foodId, food, quantities(), null);
       const quantityNote = h('small', { class: 'usual-quantity-note' }, habitual === null ? '' : `Abituale: ${formatFoodAmount(ingredient.foodId, food, habitual)}`);
-      return h('div', { class: 'edit-ingredient' }, h('div', {}, h('label', { for: `ingredient-${index}` }, food.name), h('small', {}, measure.unit === 'cucchiai' ? `1 cucchiaio ≈ ${food.unit === 'ml' ? '15 ml' : '13,5 g'}. Quantità in multipli di 0,25.` : food.unitNote), quantityNote),
+      return h('div', { class: 'edit-ingredient' }, h('div', {}, h('label', { for: `ingredient-${index}` }, food.name), h('details', { class: 'ingredient-options' }, h('summary', {}, 'Dettagli alimento'), h('small', {}, measure.unit === 'cucchiai' ? `1 cucchiaio ≈ ${food.unit === 'ml' ? '15 ml' : '13,5 g'}. Quantità in multipli di 0,25.` : food.unitNote)), quantityNote),
         h('div', { class: 'ingredient-quantity-actions' }, h('div', { class: 'gram-control' }, grams, h('span', {}, measure.unit)),
           button('Usa come abituale', () => { try {
             if (!Number.isFinite(draft.ingredients[index].grams)) throw new Error('Controlla la quantità prima di salvarla.');
@@ -723,31 +725,57 @@ function editMeal(original) {
       rebuild();
     },
   });
-  const variantSelect = h('select', { 'aria-label': 'Scegli un’alternativa completa', onchange: event => {
-    if (event.target.value === '') return;
-    if (event.target.value.startsWith('recipe:')) {
-      try {
-        const recipe = recipes.find(item => item.id === event.target.value.slice(7));
+  const mealEditor = h('div', { class: 'meal-editor-view' });
+  const recipeChooser = h('div', { class: 'recipe-chooser', hidden: true });
+  const recipeResults = h('div', { class: 'recipe-choice-list' });
+  const backToMeal = () => { recipeChooser.hidden = true; mealEditor.hidden = false; changeRecipe.focus(); };
+  const chooseRecipe = entry => {
+    try {
+      const before = clone(draft);
+      if (entry.recipe) {
+        const recipe = entry.recipe;
         const result = fitForSlot(data.days[selectedDate], original, recipe.ingredients, distributionFor(data.days[selectedDate]), fitModeFor(recipe.name));
-        const before = clone(draft); draft = { ...original, title: recipe.name, ingredients: result.ingredients, note: '' };
-        fitted = true; rebuild(); showAdaptation(before); fitStatus.replaceChildren(fitComparison(result));
-      } catch (e) { errors.textContent = e.message; }
-      return;
-    }
-    fitStatus.replaceChildren();
-    const index = Number(event.target.value);
-    const choice = index === -1 ? original : alternatives[index];
-    if (choice) { const before = clone(draft); draft = { ...clone(choice), ingredients: normalizeOilIngredients(choice.ingredients, data.foodOverrides) }; draft.id = original.id; draft.slot = original.slot; draft.time = original.time; rebuild(); showAdaptation(before); }
-  } }, h('option', { value: '' }, 'Scegli un’alternativa…'), h('option', { value: '-1' }, 'Pasto originale'), ...alternatives.map((meal, index) => h('option', { value: index }, meal.title)), h('optgroup', { label: 'Le tue ricette · quantità automatiche' }, ...recipes.map(recipe => h('option', { value: `recipe:${recipe.id}` }, recipe.name))));
-  container.append(dialogHeading('Componi il tuo pasto', 'Aggiungi alimenti, scegli le quantità e controlla i macro.'), field('Alternative del pasto', variantSelect, original.slot === 'breakfast' ? 'Tra le colazioni: budino proteico, mousse proteica e yogurt greco con cioccolato.' : null), controls,
-    ['lunch', 'dinner'].includes(original.slot) ? h('p', { class: 'swap-explanation' }, 'Cambiando alimento si adattano anche la porzione di carne, pesce o uova e l’olio. Le proteine di pasta e legumi sono già conteggiate.') : document.createDocumentFragment(),
-    button('Calcola quantità per i miei macro', () => { try {
+        draft = { ...original, title: recipe.name, ingredients: result.ingredients, note: '' };
+        fitted = true; rebuild(); fitStatus.replaceChildren(fitComparison(result));
+      } else {
+        draft = { ...clone(entry.meal), ingredients: normalizeOilIngredients(entry.meal.ingredients, data.foodOverrides), id: original.id, slot: original.slot, time: original.time };
+        rebuild();
+      }
+      showAdaptation(before); backToMeal();
+    } catch (error) { errors.textContent = error.message; }
+  };
+  const normalizeSearch = value => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const recipeSearch = h('input', { type: 'search', placeholder: 'Cerca per nome o ingrediente', 'aria-label': 'Cerca una ricetta per il pasto', oninput: () => renderRecipeChoices() });
+  const recipeFilter = h('select', { 'aria-label': 'Ricette per pasto', onchange: () => renderRecipeChoices() },
+    h('option', { value: original.slot }, 'Per questo pasto'), h('option', { value: 'all' }, 'Tutte le ricette'));
+  const renderRecipeChoices = () => {
+    const words = normalizeSearch(recipeSearch.value.trim()).split(/\s+/).filter(Boolean);
+    const entries = [...recipes.map(recipe => ({ ...recipe, recipe })),
+      ...alternatives.map(meal => ({ name: meal.title, slot: meal.slot, ingredients: meal.ingredients, meal }))];
+    const seen = new Set();
+    const matches = entries.filter(entry => {
+      if (recipeFilter.value !== 'all' && entry.slot !== original.slot) return false;
+      const text = normalizeSearch(`${entry.name} ${entry.ingredients.map(item => getIngredientFood(item, data.foodOverrides).name).join(' ')}`);
+      if (!words.every(word => text.includes(word)) || (!entry.recipe && seen.has(entry.name))) return false;
+      seen.add(entry.name); return true;
+    });
+    recipeResults.replaceChildren(...matches.slice(0, 12).map(entry => button([
+      h('strong', {}, entry.name), h('small', {}, entry.ingredients.slice(0, 3).map(item => getIngredientFood(item, data.foodOverrides).name).join(' · ') + (entry.ingredients.length > 3 ? '…' : '')),
+    ], () => chooseRecipe(entry), 'picker-result', { 'aria-label': `Scegli ricetta: ${entry.name}` })),
+      h('p', { class: 'helper', role: 'status' }, matches.length ? `${matches.length} ricette${matches.length > 12 ? ' · Affina la ricerca per vedere le altre' : ''}` : 'Nessuna ricetta trovata.'));
+  };
+  recipeChooser.append(button('← Torna agli ingredienti', backToMeal, 'text-button'), h('h3', {}, 'Scegli una ricetta'), h('p', { class: 'helper' }, 'Le ricette si adattano ai macro del pasto. Puoi ritoccare le quantità prima di salvare.'),
+    h('div', { class: 'form-grid' }, field('Cerca ricetta', recipeSearch), field('Pasto', recipeFilter)), recipeResults,
+    h('details', { class: 'workflow-details' }, h('summary', {}, 'Sostituzioni rapide'), controls));
+  const changeRecipe = button('Cambia ricetta', () => { picker.close?.('', false); mealEditor.hidden = true; recipeChooser.hidden = false; renderRecipeChoices(); recipeSearch.focus(); }, 'button secondary small');
+  mealEditor.append(h('div', { class: 'meal-editor-tools' }, changeRecipe,
+    button('Adatta quantità ai macro', () => { try {
       const before = clone(draft); const result = fitForSlot(data.days[selectedDate], draft, draft.ingredients);
-      fitted = true;
-      draft.ingredients = result.ingredients; rebuild(); showAdaptation(before); fitStatus.replaceChildren(fitComparison(result));
-    } catch (e) { errors.textContent = e.message; } }, 'button secondary'),
-    adaptation, fitStatus, ingredientFields, picker.element,
-    h('p', { class: 'helper' }, 'Pesi della parte edibile: crudo o secco, salvo la nota dell’alimento. Per uova e albumi usa i grammi effettivi.'), values, errors,
+      fitted = true; draft.ingredients = result.ingredients; rebuild(); showAdaptation(before); fitStatus.replaceChildren(fitComparison(result));
+    } catch (e) { errors.textContent = e.message; } }, 'button secondary small')),
+    fitStatus, ingredientFields, picker.element,
+    h('details', { class: 'workflow-details' }, h('summary', {}, 'Dettagli delle quantità'),
+      h('p', { class: 'helper' }, 'Pesi a crudo o secco, salvo la nota dell’alimento. Olio in quarti di cucchiaio.'), adaptation), values,
     h('div', { class: 'dialog-actions' }, button('Annulla', closeDialog), button('Salva questo pasto', () => {
       if (!draft.ingredients.length) { errors.textContent = 'Aggiungi almeno un ingrediente al pasto.'; return; }
       const invalid = [...ingredientFields.querySelectorAll('input')].some(input => !input.checkValidity() || input.value === '');
@@ -770,6 +798,7 @@ function editMeal(original) {
         }
       } catch (error) { errors.textContent = error.message; }
     }, 'button primary')));
+  container.append(dialogHeading(`${RECIPE_SLOTS.find(slot => slot.id === original.slot)?.label || 'Pasto'} · ${original.time}`, longDate(selectedDate)), recipeChooser, mealEditor, errors);
   rebuild();
   showDialog(container);
   disposeMealEditor = picker.dispose;
@@ -1340,7 +1369,14 @@ function renderPersonalPortions() {
   disposePortions = panel.dispose; return panel.element;
 }
 
-function renderFoods() {
+function foodSettingsSection(title, ...content) {
+  const section = h('details', { class: 'workflow-details settings-group' }, h('summary', {}, title), ...content);
+  section.open = openFoodSettings.has(title);
+  section.addEventListener('toggle', () => { if (section.open) openFoodSettings.add(title); else openFoodSettings.delete(title); });
+  return section;
+}
+
+function renderFoodSettings() {
   const food = getFood(labelFoodId, data.foodOverrides);
   const orderedFoods = [...LIDL_FOOD_IDS.map(id => FOODS.find(item => item.id === id)).filter(Boolean), ...FOODS.filter(item => !LIDL_FOOD_IDS.includes(item.id))];
   const formError = h('p', { class: 'form-error', role: 'alert' });
@@ -1361,12 +1397,12 @@ function renderFoods() {
       getFood(labelFoodId, next.foodOverrides); persist(next); render(); if (!unsaved) notify('Etichetta salvata per i nuovi piani.');
     } catch (error) { formError.textContent = error.message; }
   });
-  const portions = renderPersonalPortions();
-  return h('div', { class: 'page foods-page' }, pageTitle('QUELLO CHE MANGI', 'Alimenti e quantità.', 'Modifica ricette e porzioni, poi calcola le quantità per i tuoi obiettivi.'), renderDistributionPanel(), renderRecipes(), renderUsualQuantities(), portions,
-    h('section', { class: 'panel label-panel' }, h('div', { class: 'section-heading' }, h('div', {}, h('p', { class: 'eyebrow' }, 'IL RIFERIMENTO PER OGNI VARIANTE'), h('h2', {}, 'Etichette e valori nutrizionali'), h('p', {}, 'I valori delle varianti sono già inseriti. Puoi modificarli facoltativamente per una confezione diversa.'))), form),
-    h('section', { class: 'panel refresh-panel' }, h('div', {}, h('h2', {}, 'Hai già pianificato i prossimi pasti?'), h('p', {}, 'Puoi aggiornarne i valori nutrizionali e le note di riferimento senza cambiare i grammi. I pasti mangiati, i giorni passati e le tue etichette personali restano invariati.')),
-      button('Aggiorna i pasti da oggi in poi', refreshPlannedMeals, 'button secondary', { disabled: Boolean(storageReadError || storageConflict) })),
-    h('div', { class: 'section-heading' }, h('div', {}, h('h2', {}, 'Il catalogo del piano'), h('p', {}, 'Energia e macronutrienti per 100 g di parte edibile; latte per 100 ml.'))),
+  return h('div', { class: 'food-settings' },
+    foodSettingsSection('Distribuzione dei macro', renderDistributionPanel()),
+    foodSettingsSection('Etichette e valori nutrizionali', h('section', { class: 'panel label-panel' }, h('div', { class: 'section-heading' }, h('div', {}, h('p', { class: 'eyebrow' }, 'IL RIFERIMENTO PER OGNI VARIANTE'), h('h2', {}, 'Etichette e valori nutrizionali'), h('p', {}, 'I valori delle varianti sono già inseriti. Puoi modificarli facoltativamente per una confezione diversa.'))), form)),
+    foodSettingsSection('Aggiorna i pasti pianificati', h('section', { class: 'panel refresh-panel' }, h('div', {}, h('h2', {}, 'Hai già pianificato i prossimi pasti?'), h('p', {}, 'Puoi aggiornarne i valori nutrizionali e le note di riferimento senza cambiare i grammi. I pasti mangiati, i giorni passati e le tue etichette personali restano invariati.')),
+      button('Aggiorna i pasti da oggi in poi', refreshPlannedMeals, 'button secondary', { disabled: Boolean(storageReadError || storageConflict) }))),
+    foodSettingsSection('Catalogo e fonti', h('div', { class: 'section-heading' }, h('div', {}, h('h2', {}, 'Il catalogo del piano'), h('p', {}, 'Energia e macronutrienti per 100 g di parte edibile; latte per 100 ml.'))),
     h('div', { class: 'food-catalog' }, ...FOODS.map(base => {
       const item = getFood(base.id, data.foodOverrides);
       return h('article', { class: 'food-card' }, h('div', { class: 'food-card-top' }, h('h3', {}, item.name), foodStatus(item)),
@@ -1374,7 +1410,16 @@ function renderFoods() {
         h('p', { class: 'food-macros' }, `P ${formatDecimal(item.protein)} g · C ${formatDecimal(item.carbs)} g · G ${formatDecimal(item.fat)} g`),
         h('p', { class: 'helper' }, item.unitNote), labelReference(item),
         item.source !== item.label?.evidenceUrl && h('p', { class: 'food-source' }, /^https?:\/\//.test(item.source) ? h('a', { href: item.source, target: '_blank', rel: 'noopener noreferrer' }, item.label ? 'Scheda prodotto e provenienza ↗' : 'Consulta la fonte ↗') : item.source));
-    })));
+    }))));
+}
+
+function renderFoods() {
+  const tabs = [['recipes', 'Ricette'], ['portions', 'Porzioni'], ['settings', 'Impostazioni']];
+  const active = tabs.find(([id]) => id === foodsView)?.[0] || 'recipes';
+  return h('div', { class: 'page foods-page' }, pageTitle('LA TUA LIBRERIA', 'Alimenti.', ''),
+    h('div', { class: 'workflow-tabs', role: 'group', 'aria-label': 'Sezioni alimenti' }, ...tabs.map(([id, label]) => button(label, () => { foodsView = id; render(); $('.workflow-tabs [aria-pressed="true"]')?.focus(); }, 'button secondary', { 'aria-pressed': String(active === id) }))),
+    active === 'recipes' ? renderRecipes() : active === 'portions' ? h('div', {}, renderPersonalPortions(),
+      foodSettingsSection('Quantità abituali degli alimenti', renderUsualQuantities())) : renderFoodSettings());
 }
 
 function renderMethod() {

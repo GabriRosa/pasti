@@ -633,3 +633,46 @@ input[type="checkbox"] { accent-color: var(--accent); }
   .distribution-table thead th { font-size: .6rem; }
   .distribution-table input { min-width: 0; padding: 10px 3px; font-size: 16px; }
 }
+
+/* One focused meal/library task at a time. */
+.workflow-tabs, .picker-modes { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 24px; }
+.workflow-tabs .button, .picker-modes .button { flex: 1; min-width: 0; }
+.workflow-tabs [aria-pressed="true"], .picker-modes [aria-pressed="true"] { background: var(--button-bg); color: var(--button-ink); border-color: var(--button-bg); }
+.workflow-details { border-top: 1px solid var(--line); margin: 16px 0; }
+.workflow-details > summary { cursor: pointer; padding: 16px 0; font-size: .85rem; color: var(--ink-soft); }
+.workflow-details[open] > summary { color: var(--ink); }
+.settings-group { padding-inline: 20px; border: 1px solid var(--line); border-radius: 14px; background: var(--paper); }
+.settings-group > .panel { padding: 0 0 20px; margin: 0; border: 0; background: none; }
+.meal-editor-tools { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.meal-editor-tools .button { flex: 1; }
+.meal-food-picker[data-open="false"] { margin: 16px 0; padding: 0; border: 0; background: none; }
+.meal-food-picker[data-open="false"] > .button { width: 100%; }
+.picker-status:empty { display: none; }
+.picker-chooser .section-heading { align-items: center; margin-bottom: 16px; gap: 12px; }
+.picker-chooser .section-heading h3 { margin: 0; }
+.picker-chooser .picker-barcode { border: 0; padding: 0; margin: 0; }
+.picker-chooser .picker-editor:not(:empty) { border: 0; padding: 12px 0 0; }
+.recipe-chooser > h3 { margin: 16px 0; }
+.recipe-choice-list { margin-top: 16px; }
+.library-editing .recipe-editor { border: 0; margin: 0; padding: 0; }
+.library-back { margin-bottom: 16px; }
+.recipe-catalog { grid-template-columns: 1fr; gap: 0; }
+.recipe-catalog .recipe-card { border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 20px 0; background: transparent; }
+.recipe-catalog .recipe-card h3 { font-size: 1rem; margin-bottom: 8px; }
+.recipe-catalog .food-calories { font-size: .8rem; }
+.recipe-catalog .form-actions { margin-top: 12px; }
+.recipe-card details > summary { color: var(--ink-soft); cursor: pointer; font-size: .78rem; }
+.ingredient-options > summary { cursor: pointer; color: var(--ink-soft); font-size: .68rem; padding-block: 6px; }
+.ingredient-options[open] { max-width: 280px; }
+@media (max-width: 600px) {
+  .workflow-tabs { gap: 6px; margin-bottom: 16px; }
+  .workflow-tabs .button, .picker-modes .button { padding: 10px 7px; font-size: .76rem; }
+  .meal-editor-tools .button { padding: 10px 8px; font-size: .74rem; }
+  .picker-chooser .section-heading { flex-wrap: wrap; }
+  .picker-chooser .picker-modes { gap: 5px; }
+  .settings-group { padding-inline: 14px; }
+  .recipes-panel .section-heading { align-items: start; flex-wrap: wrap; }
+  .recipe-catalog .form-actions { gap: 12px; }
+  .recipe-catalog .button { padding: 10px 12px; }
+  .meal-editor-view .gram-control input { width: 76px; font-size: 16px; }
+}

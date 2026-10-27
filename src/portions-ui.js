@@ -5,7 +5,10 @@ export function renderPortions({ h, field, button, getPortions, save, remove, ad
   let disposed = false, request, searchVersion = 0;
   const section = h('section', { class: 'panel portions-panel', 'aria-label': 'Codice a barre e porzioni personali' });
   const status = h('p', { role: 'status', 'aria-live': 'polite', class: 'helper' });
-  const editor = h('div');
+  const library = h('div', { class: 'library-view' });
+  const heading = h('h2', {}, 'Le mie porzioni');
+  const create = h('div', { class: 'portion-create', hidden: true });
+  const editor = h('div', { class: 'portion-editor-view', hidden: true });
   const list = h('div', { class: 'personal-portions' });
   const video = h('video', { playsinline: true, muted: true, autoplay: true, class: 'barcode-video' });
   video.muted = true;
@@ -17,6 +20,16 @@ export function renderPortions({ h, field, button, getPortions, save, remove, ad
   const codeInput = h('input', { type: 'text', inputmode: 'numeric', autocomplete: 'off', maxlength: 24, placeholder: 'Es. 4056489759096', 'aria-label': 'Codice a barre' });
   const searchButton = h('button', { type: 'submit', class: 'button secondary' }, 'Cerca prodotto');
   const form = h('form', { class: 'barcode-search', onsubmit: event => { event.preventDefault(); void search(codeInput.value); } }, field('Oppure scrivi il codice', codeInput), searchButton);
+  function setView(view) {
+    library.hidden = view !== 'library'; create.hidden = view !== 'create'; editor.hidden = view !== 'editor';
+    section.classList.toggle('library-editing', view !== 'library');
+  }
+  function cancelWork() {
+    scanner.stop(); camera.hidden = true; request?.abort(); searchVersion++; searchButton.disabled = false;
+  }
+  function closeEditor() {
+    cancelWork(); editor.replaceChildren(); setView('library'); status.textContent = ''; library.querySelector('button')?.focus();
+  }
   async function search(input) {
     let barcode;
     try { barcode = normalizeBarcode(input); } catch (error) { status.textContent = error.message; return; }
@@ -36,6 +49,8 @@ export function renderPortions({ h, field, button, getPortions, save, remove, ad
     } finally { if (!disposed && version === searchVersion) searchButton.disabled = false; }
   }
   function openEditor(food, portion) {
+    if (disposed) return;
+    scanner.stop(); camera.hidden = true; setView('editor');
     const name = h('input', { type: 'text', required: true, maxlength: 200, value: food.name });
     const brand = h('input', { type: 'text', maxlength: 200, value: food.brand });
     const unit = h('select', {}, h('option', { value: 'g', selected: food.unit === 'g' }, 'Per 100 g'), h('option', { value: 'ml', selected: food.unit === 'ml' }, 'Per 100 ml'));
@@ -73,9 +88,10 @@ export function renderPortions({ h, field, button, getPortions, save, remove, ad
         const values = validatePersonalFood(read());
         if (!amountValid()) throw new Error(spec.factor === 1 ? 'Inserisci una quantità tra 0,1 e 3.000.' : 'Per l’olio usa multipli di 0,25 cucchiai.');
         const saved = { id: portionId, food: values, grams: toStoredAmount(portionId, values, amount.valueAsNumber) };
-        save(saved); editor.replaceChildren(); renderList(); status.textContent = 'Porzione salvata. Ora puoi aggiungerla a un pasto.';
+        save(saved); closeEditor(); renderList(); status.textContent = 'Porzione salvata. Ora puoi aggiungerla a un pasto.';
       } catch (error) { errorBox.textContent = error.message; }
-    } }, h('h3', {}, portion ? 'Modifica la porzione personale' : 'La tua porzione'),
+    } }, button('Torna alle porzioni', closeEditor, 'text-button library-back'),
+    h('h3', {}, portion ? 'Modifica la porzione personale' : 'La tua porzione'),
     food.barcode && h('p', { class: 'helper' }, `Codice ${food.barcode} · `, h('a', { href: `https://world.openfoodfacts.org/product/${food.barcode}`, target: '_blank', rel: 'noopener noreferrer' }, 'Scheda Open Food Facts ↗')),
     h('div', { class: 'form-grid' }, field('Nome del prodotto', name), field('Marca · facoltativa', brand)),
     field('Base dei valori in etichetta', unit, 'Usa i valori del prodotto come venduto. Grammi e millilitri non sono intercambiabili.'),
@@ -84,32 +100,37 @@ export function renderPortions({ h, field, button, getPortions, save, remove, ad
       return field(label, inputs[key]);
     })), field(quantityLabel, amount), totals,
     h('p', { class: 'helper' }, 'Verifica i dati con la confezione. Un valore mancante va completato, non è uno zero. Le modifiche restano personali.'), errorBox,
-    h('div', { class: 'form-actions' }, h('button', { type: 'submit', class: 'button primary' }, 'Salva porzione personale'), button('Annulla', () => editor.replaceChildren())));
-    editor.replaceChildren(editForm); update();
+    h('div', { class: 'form-actions' }, h('button', { type: 'submit', class: 'button primary' }, 'Salva porzione personale'), button('Annulla', closeEditor)));
+    editor.replaceChildren(editForm); update(); name.focus();
   }
   function renderList() {
     const portions = getPortions();
-    list.replaceChildren(h('h3', {}, `Le tue porzioni${portions.length ? ` · ${portions.length}` : ''}`),
-      portions.length ? h('div', { class: 'food-catalog' }, ...portions.map(portion => {
+    heading.textContent = `Le mie porzioni${portions.length ? ` · ${portions.length}` : ''}`;
+    list.replaceChildren(portions.length ? h('div', { class: 'food-catalog' }, ...portions.map(portion => {
         const f = portion.food, ratio = portion.grams / 100, fmt = n => n.toLocaleString('it-IT', { maximumFractionDigits: 1 });
-        return h('article', { class: 'food-card' }, h('h4', {}, f.name), h('p', { class: 'helper' }, f.brand),
+        return h('article', { class: 'food-card' }, h('h3', {}, f.name), f.brand && h('p', { class: 'helper' }, f.brand),
           h('p', { class: 'food-calories' }, `${formatFoodAmount(portion.id, f, portion.grams)} · ${fmt(f.kcal * ratio)} kcal`),
           h('p', {}, `P ${fmt(f.protein * ratio)} g · C ${fmt(f.carbs * ratio)} g · G ${fmt(f.fat * ratio)} g`),
           h('div', { class: 'form-actions' }, button('Aggiungi a un pasto', () => addToMeal(portion), 'button primary small'),
-          button('Modifica', () => { scanner.stop(); camera.hidden = true; request?.abort(); searchVersion++; searchButton.disabled = false; openEditor(f, portion); editor.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 'text-button'),
-          button('Elimina', async () => { try { if (await remove(portion)) { editor.replaceChildren(); renderList(); } } catch (e) { reportError(e.message); } }, 'text-button')));
+          button('Modifica', () => { cancelWork(); status.textContent = ''; openEditor(f, portion); editor.scrollIntoView?.({ behavior: 'smooth', block: 'start' }); }, 'text-button'),
+          button('Elimina', async () => { try { if (await remove(portion)) { closeEditor(); renderList(); } } catch (e) { reportError(e.message); } }, 'text-button')));
       })) : h('p', { class: 'helper' }, 'Le porzioni che salvi compariranno qui, pronte da usare nel diario.'));
   }
   const stopCamera = () => { scanner.stop(); camera.hidden = true; };
   const visibility = () => { if (document.hidden) stopCamera(); };
   document.addEventListener('visibilitychange', visibility);
   window.addEventListener('pagehide', stopCamera);
-  section.append(h('p', { class: 'eyebrow' }, 'DALLA CONFEZIONE AL DIARIO'), h('h2', {}, 'Scansiona e salva la tua porzione'),
-    h('p', {}, 'Inquadra il codice a barre, controlla i valori e scegli la quantità da mangiare.'),
+  library.append(h('div', { class: 'section-heading' }, h('div', {}, heading,
+    h('p', { class: 'helper' }, 'I tuoi prodotti, pronti da aggiungere a un pasto.')),
+    button('Nuova porzione', () => { cancelWork(); editor.replaceChildren(); status.textContent = ''; setView('create'); codeInput.focus(); }, 'button primary')), list);
+  create.append(button('Torna alle porzioni', closeEditor, 'text-button library-back'), h('h3', {}, 'Nuova porzione'),
+    h('p', { class: 'helper' }, 'Cerca il prodotto con il codice a barre o inserisci i valori della confezione.'),
     h('div', { class: 'form-actions' }, button('Inquadra codice a barre', () => { request?.abort(); searchVersion++; searchButton.disabled = false; editor.replaceChildren(); camera.hidden = false; status.textContent = 'Avvio fotocamera…'; void scanner.start(); }, 'button primary'),
-      button('Inserisci prodotto a mano', () => { request?.abort(); searchVersion++; searchButton.disabled = false; stopCamera(); status.textContent = ''; openEditor({ name: '', brand: '', barcode: '', unit: 'g', kcal: null, protein: null, carbs: null, fat: null }); }, 'text-button')),
-    h('p', { class: 'helper' }, 'La fotocamera legge il codice sul dispositivo. Solo il codice viene inviato a Open Food Facts, senza foto né dati del diario.'), camera, form, status, editor, list,
+      button('Inserisci prodotto a mano', () => { cancelWork(); status.textContent = ''; openEditor({ name: '', brand: '', barcode: '', unit: 'g', kcal: null, protein: null, carbs: null, fat: null }); }, 'text-button')),
+    camera, form,
+    h('p', { class: 'helper' }, 'La fotocamera legge il codice sul dispositivo. Solo il codice viene inviato a Open Food Facts, senza foto né dati del diario.'),
     h('p', { class: 'helper' }, 'Dati prodotti: ', h('a', { href: 'https://world.openfoodfacts.org', target: '_blank', rel: 'noopener noreferrer' }, 'Open Food Facts'), ' · ', h('a', { href: 'https://opendatacommons.org/licenses/odbl/1-0/', target: '_blank', rel: 'noopener noreferrer' }, 'ODbL'), '. Le schede possono essere incomplete o non aggiornate.'));
+  section.append(library, create, status, editor);
   renderList();
   return { element: section, dispose: () => { disposed = true; searchVersion++; request?.abort(); stopCamera(); document.removeEventListener('visibilitychange', visibility); window.removeEventListener('pagehide', stopCamera); } };
 }

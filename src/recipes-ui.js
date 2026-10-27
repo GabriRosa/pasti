@@ -1,5 +1,5 @@
 import { quantitySpec, toStoredAmount, formatFoodAmount, quantizeFoodAmount } from './food-measures.js?v=20261027-oil';
-import { createMealFoodPicker } from './meal-food-picker.js?v=20261027-oil';
+import { createMealFoodPicker } from './meal-food-picker.js?v=20261027-simple-meals';
 import { mealFromIngredients } from './planner.js?v=20261027-oil';
 
 const SLOTS = [
@@ -19,7 +19,8 @@ const macroText = values => `${fmt(values.kcal)} kcal · P ${fmt(values.protein)
 export function renderRecipeLibrary({ h, field, button, getRecipes, getFoods, getFoodForIngredient, onSave, onUse, onError }) {
   let disposed = false, picker = null, shown = 12;
   const root = h('section', { class: 'panel recipes-panel', 'aria-label': 'Le mie ricette base' });
-  const editor = h('div', { class: 'recipe-editor' });
+  const editor = h('div', { class: 'recipe-editor', hidden: true });
+  const library = h('div', { class: 'library-view' });
   const list = h('div', { class: 'recipe-list' });
   const status = h('p', { class: 'helper', role: 'status', 'aria-live': 'polite' });
   const search = h('input', { type: 'search', placeholder: 'Cerca una ricetta o un ingrediente', 'aria-label': 'Cerca nelle ricette base', oninput: () => { shown = 12; renderList(); } });
@@ -38,6 +39,7 @@ export function renderRecipeLibrary({ h, field, button, getRecipes, getFoods, ge
   }
   function closeEditor() {
     picker?.dispose(); picker = null; editor.replaceChildren();
+    editor.hidden = true; library.hidden = false; root.classList.toggle('library-editing', false); search.focus();
   }
   function ingredientLine(item) {
     const food = getFoodForIngredient(item);
@@ -73,6 +75,7 @@ export function renderRecipeLibrary({ h, field, button, getRecipes, getFoods, ge
   function openEditor(original = null) {
     if (disposed) return;
     closeEditor();
+    library.hidden = true; editor.hidden = false; root.classList.toggle('library-editing', true);
     const draft = original ? copy(original) : { id: `recipe-user-${crypto.randomUUID()}`, name: '', slot: 'lunch', ingredients: [] };
     for (const item of draft.ingredients) {
       try { item.grams = quantizeFoodAmount(item.foodId, getFoodForIngredient(item), item.grams); } catch { /* Invalid labels remain editable below. */ }
@@ -136,16 +139,18 @@ export function renderRecipeLibrary({ h, field, button, getRecipes, getFoods, ge
         closeEditor(); renderList(); status.textContent = `Ricetta salvata: ${recipe.name}. I pasti già presenti nel diario restano invariati.`;
       } catch (error) { errors.textContent = error.message; }
     };
-    editor.append(h('h3', {}, original ? 'Modifica la ricetta base' : 'Nuova ricetta base'),
+    editor.append(button('Torna alle ricette', () => { closeEditor(); status.textContent = 'Modifica annullata.'; }, 'text-button library-back'),
+      h('h3', {}, original ? 'Modifica la ricetta base' : 'Nuova ricetta base'),
       h('div', { class: 'form-grid' }, field('Nome della ricetta', name), field('Pasto abituale', slot)),
       h('p', { class: 'helper' }, 'Salva ingredienti e quantità di partenza. Quando usi la ricetta nel giorno, Pasti adatta le quantità agli obiettivi del pasto.'),
       rows, picker.element, totals, errors,
       h('div', { class: 'form-actions' }, button('Salva ricetta', save, 'button primary'), button('Annulla modifica ricetta', () => { closeEditor(); status.textContent = 'Modifica annullata.'; }, 'text-button')));
     renderIngredients(); name.focus(); editor.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
   }
-  root.append(h('div', { class: 'section-heading' }, h('div', {}, h('p', { class: 'eyebrow' }, 'LE TUE PREPARAZIONI'), h('h2', {}, 'Le mie ricette base'),
-    h('p', {}, 'Modifica ingredienti e quantità abituali. Usa una ricetta nel giorno per calcolare le porzioni sui macro del pasto.')), button('Nuova ricetta', () => openEditor(), 'button primary')),
-    editor, h('div', { class: 'form-grid' }, field('Cerca ricette', search), field('Pasto', category)), status, list);
+  library.append(h('div', { class: 'section-heading' }, h('div', {}, h('h2', {}, 'Le mie ricette base'),
+    h('p', { class: 'helper' }, 'Scegli una base: le quantità si adattano al tuo pasto.')), button('Nuova ricetta', () => openEditor(), 'button primary')),
+    h('div', { class: 'form-grid library-search' }, field('Cerca ricette', search), field('Pasto', category)), status, list);
+  root.append(library, editor);
   renderList();
   return { element: root, dispose: () => { disposed = true; picker?.dispose(); picker = null; } };
 }
