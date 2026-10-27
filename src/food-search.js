@@ -92,7 +92,8 @@ async function search(query, { page = 1, signal, fetchImpl = fetch } = {}, upstr
     const params = upstream
       ? new URLSearchParams({ q, page: String(page), page_size: String(PAGE_SIZE), langs: 'it,en', fields: 'code,product_name,product_name_it,product_name_en,brands' })
       : new URLSearchParams({ q: text, page: String(page) });
-    const response = await fetchImpl(`${upstream ? SEARCH_URL : PROXY_URL}?${params}`, { signal: controller.signal, credentials: 'omit', referrerPolicy: 'no-referrer', redirect: 'error' });
+    // Workers supports manual redirects; non-2xx responses below remain errors.
+    const response = await fetchImpl(`${upstream ? SEARCH_URL : PROXY_URL}?${params}`, { signal: controller.signal, credentials: 'omit', referrerPolicy: 'no-referrer', redirect: 'manual' });
     if (response.status === 429) throw failure('Troppe ricerche. Attendi un minuto prima di riprovare.', 'RATE_LIMITED');
     if (!upstream && response.status === 400) throw failure('Ricerca non valida. Inserisci un nome di almeno 2 e massimo 100 caratteri.', 'INVALID_QUERY');
     if (!response.ok) throw unavailable();

@@ -20,7 +20,7 @@ test('search sends only encoded names, bounded fields and anonymous request opti
     assert.equal(parsed.searchParams.get('langs'), 'it,en');
     assert.equal(parsed.searchParams.get('fields'), 'code,product_name,product_name_it,product_name_en,brands');
     assert.deepEqual(Object.keys(options).sort(), ['credentials', 'redirect', 'referrerPolicy', 'signal']);
-    assert.equal(options.credentials, 'omit'); assert.equal(options.referrerPolicy, 'no-referrer');
+    assert.equal(options.credentials, 'omit'); assert.equal(options.referrerPolicy, 'no-referrer'); assert.equal(options.redirect, 'manual');
     return ok(body());
   } });
 });
@@ -79,7 +79,7 @@ test('pagination uses exact totals, inexact page counts and raw hits before filt
 });
 
 test('throttled and unavailable requests report a recoverable error without retries', async () => {
-  for (const [status, message] of [[429, /Attendi un minuto/], [400, /non è disponibile/], [503, /non è disponibile/]]) {
+  for (const [status, message] of [[302, /non è disponibile/], [429, /Attendi un minuto/], [400, /non è disponibile/], [503, /non è disponibile/]]) {
     let calls = 0;
     await assert.rejects(searchFoodsUpstream('yogurt', { fetchImpl: async () => { calls++; return { ok: false, status }; } }), message);
     assert.equal(calls, 1);
@@ -158,7 +158,7 @@ test('browser adapter calls the fixed Worker proxy with the original query and n
     assert.equal(parsed.origin, 'https://pasti.gabri-rosso02.workers.dev');
     assert.equal(parsed.pathname, '/api/foods/search');
     assert.deepEqual([...parsed.searchParams], [['q', 'yogurt caffè & cacao'], ['page', '2']]);
-    assert.equal(options.credentials, 'omit'); assert.equal(options.referrerPolicy, 'no-referrer'); assert.equal(options.redirect, 'error');
+    assert.equal(options.credentials, 'omit'); assert.equal(options.referrerPolicy, 'no-referrer'); assert.equal(options.redirect, 'manual');
     return new Response(JSON.stringify({ items: [{ barcode: code, name: 'Yogurt', brand: 'Marca', kcal: 99 }], page: 2, hasMore: true }));
   } });
   assert.deepEqual(result, { items: [{ barcode: code, name: 'Yogurt', brand: 'Marca' }], page: 2, hasMore: true });
