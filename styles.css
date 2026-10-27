@@ -610,3 +610,22 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .picker-barcode h4 { margin: 0 0 12px; font-size: .9rem; }
 .picker-barcode .barcode-search { margin-top: 14px; }
 .meal-heading > .eyebrow { margin-bottom: 12px; }
+
+/* Editable recipes and meal macro allocation. */
+.recipes-panel, .distribution-panel, .usual-quantities-panel { padding: 24px; margin-bottom: 24px; }
+.distribution-table-wrap { overflow-x: auto; }
+.distribution-table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+.distribution-table th, .distribution-table td { text-align: left; padding: 12px 8px; border-bottom: 1px solid var(--line); }
+.distribution-table input { width: 100%; min-width: 68px; }
+.distribution-table th:first-child { min-width: 130px; }
+.daily-distribution { margin: 18px 0; }
+.daily-distribution > summary { cursor: pointer; padding: 14px 0; font-weight: 600; }
+.recipe-editor:not(:empty) { padding: 20px 0; border-block: 1px solid var(--line); margin: 20px 0; }
+.recipe-list .food-card { min-width: 0; }
+.recipe-ingredient-preview { padding-left: 22px; line-height: 1.7; }
+.fit-meal-preview { padding-block: 18px; border-bottom: 1px solid var(--line); }
+.fit-comparison { padding-block: 8px; }
+@media (max-width: 600px) {
+  .recipes-panel, .distribution-panel, .usual-quantities-panel { padding: 16px; }
+  .distribution-table th, .distribution-table td { padding: 10px 5px; font-size: .85rem; }
+}

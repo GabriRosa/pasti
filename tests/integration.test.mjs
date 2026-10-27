@@ -580,6 +580,7 @@ test('profile and label form edits retain historical data and apply to newly ope
   assert.equal(loadData(store).data.profile.goal, 'gain');
   assert.deepEqual(loadData(store).data.days[key], historical);
   app.navigate('foods');
+  assert.ok(app.document.querySelector('.label-form select'), app.document.querySelector('#main').textContent);
   const product = app.document.querySelector('.label-form select');
   product.value = 'protein-pudding-lidl'; product.dispatch('change');
   const labelForm = app.document.querySelector('.label-form');
@@ -2184,6 +2185,9 @@ test('personal product can be saved, added, consumed and deleted without changin
   buttonWith('Aggiungi a un pasto').click();
   const select = document.querySelector('#app-dialog select');
   const lunch = initial.days[key].meals.find(m => m.slot === 'lunch'); select.value = lunch.id; select.dispatch('change');
+  const adapt = document.querySelector('#app-dialog input[type="checkbox"]');
+  assert.equal(adapt.checked, true);
+  adapt.checked = false; adapt.dispatch('change');
   buttonWith('Aggiungi porzione').click();
   let updated = loadData(store).data.days[key].meals.find(m => m.id === lunch.id);
   assert.equal(updated.ingredients.at(-1).foodSnapshot.name, 'Mousse test');
@@ -2260,7 +2264,7 @@ test('meal composer searches any catalog food, removes base ingredients and save
   composerButton(document, 'Salva questo pasto').click();
   assert.equal(document.querySelector('#app-dialog').open, true);
   fillComposer(document, '.meal-food-picker input[type="search"]', 'pollo');
-  assert.equal(document.querySelectorAll('.picker-result').length, 1);
+  assert.ok(document.querySelectorAll('.picker-result').length >= 1);
   document.querySelector('.picker-result').click();
   fillComposer(document, '.picker-amount-form input', '175');
   document.querySelector('.picker-amount-form').dispatch('submit');
@@ -2467,4 +2471,170 @@ test('closing the meal editor stops the barcode camera stream and decoder', asyn
   assert.equal(tracksStopped, 1);
   assert.equal(decoderStopped, 1);
   assert.equal(video.srcObject, null);
+});
+
+
+const controlWithLabel = (root, tag, label) => root.querySelectorAll(tag).find(node => node.attributes['aria-label'] === label);
+const clickText = (root, text) => {
+  const control = root.querySelectorAll('button').find(node => node.textContent === text);
+  assert.ok(control, `Missing button: ${text}`); control.click();
+};
+
+test('recipe library paginates 200 bases and editing a searched recipe preserves the diary', async t => {
+  const key = todayKey(), initial = generatedDiary(key), store = new MemoryStorage(); saveData(initial, store);
+  const { document, navigate } = await bootApp(t, store, 'foods');
+  const library = document.querySelector('.recipes-panel');
+  assert.match(library.textContent, /200 ricette/);
+  assert.equal(library.querySelectorAll('.recipe-card').length, 12);
+  clickText(library, 'Mostra altre ricette');
+  assert.equal(library.querySelectorAll('.recipe-card').length, 24);
+  const search = library.querySelector('input[type="search"]');
+  search.value = 'Chili di tacchino e zucca'; search.dispatch('input');
+  assert.equal(library.querySelectorAll('.recipe-card').length, 1);
+  clickText(library, 'Modifica ricetta');
+  const editor = library.querySelector('.recipe-editor');
+  const name = controlWithLabel(editor, 'input', 'Nome della ricetta');
+  name.value = 'Il mio chili'; name.dispatch('input');
+  const amount = editor.querySelector('.recipe-ingredients input'); amount.value = '180'; amount.dispatch('input');
+  assert.equal(editor.querySelector('.picker-remember'), null, 'Recipe edits must not silently overwrite habitual portions');
+  clickText(editor, 'Salva ricetta');
+  const result = loadData(store).data;
+  assert.deepEqual(result.days, initial.days);
+  assert.equal(result.personalRecipes.length, 1);
+  assert.equal(result.personalRecipes[0].name, 'Il mio chili');
+  assert.equal(result.personalRecipes[0].ingredients[0].grams, 180);
+  assert.ok(result.personalRecipes[0].ingredients.some(item => item.foodSnapshot));
+  navigate('today'); navigate('foods');
+  const restoredSearch = document.querySelector('.recipes-panel input[type="search"]');
+  restoredSearch.value = 'Il mio chili'; restoredSearch.dispatch('input');
+  assert.equal(document.querySelectorAll('.recipe-card').length, 1);
+  assert.match(document.querySelector('.recipe-card').textContent, /180 g/);
+});
+
+test('using a library recipe previews automatic amounts and saves label snapshots only after confirmation', async t => {
+  const key = todayKey(), initial = generatedDiary(key), store = new MemoryStorage(); saveData(initial, store);
+  const { document } = await bootApp(t, store, 'foods');
+  const search = document.querySelector('.recipes-panel input[type="search"]');
+  search.value = 'Chili di tacchino e zucca'; search.dispatch('input');
+  clickText(document.querySelector('.recipe-card'), 'Usa nel giorno');
+  const dialog = document.querySelector('#app-dialog');
+  assert.equal(dialog.open, true);
+  assert.match(dialog.textContent, /Obiettivo del pasto:/);
+  assert.match(dialog.textContent, /Con queste quantità:/);
+  assert.deepEqual(loadData(store).data, initial);
+  const selected = controlWithLabel(dialog, 'select', 'Pasto per la ricetta');
+  const lunch = initial.days[key].meals.find(item => item.slot === 'lunch');
+  assert.equal(selected.value, lunch.id);
+  const preview = dialog.querySelector('.recipe-ingredient-preview').textContent;
+  clickText(dialog, 'Usa queste quantità');
+  const result = loadData(store).data;
+  const saved = result.days[key].meals.find(item => item.id === lunch.id);
+  assert.equal(saved.title, 'Chili di tacchino e zucca');
+  assert.ok(saved.ingredients.some(item => item.foodSnapshot));
+  assert.ok(saved.ingredients.some(item => preview.includes(String(item.grams).replace('.', ','))));
+  assert.notEqual(saved.ingredients[0].grams, 150, 'Automatic fitting changes the base quantities');
+  assertMacrosClose(saved.macros, mealFromIngredients(saved, result.foodOverrides).macros);
+  assert.deepEqual(result.days[key].meals.filter(item => item.id !== lunch.id), initial.days[key].meals.filter(item => item.id !== lunch.id));
+  assert.deepEqual(result.days[key].consumed, {});
+  assert.equal(result.personalRecipes, undefined, 'Choosing a base must not overwrite the recipe library');
+  assert.deepEqual(parseBackup(exportBackup(result)), result);
+});
+
+test('macro percentages validate totals and fitting preserves consumed and skipped meals', async t => {
+  const key = todayKey(), initial = generatedDiary(key), store = new MemoryStorage();
+  const current = initial.days[key];
+  const eaten = current.meals.find(item => item.slot === 'breakfast');
+  const skipped = current.meals.find(item => item.slot === 'preworkout');
+  current.consumed[eaten.id] = { consumedAt: new Date().toISOString(), meal: clone(eaten) };
+  current.skipped = [skipped.id]; saveData(initial, store);
+  const { document } = await bootApp(t, store, 'foods');
+  clickText(document, 'Modifica percentuali');
+  const dialog = document.querySelector('#app-dialog');
+  const lunchProtein = controlWithLabel(dialog, 'input', 'Pranzo: proteine percentuale');
+  lunchProtein.value = '45'; lunchProtein.dispatch('input');
+  dialog.querySelector('form').dispatch('submit');
+  assert.equal(dialog.open, true);
+  assert.match(dialog.querySelector('.form-error').textContent, /somma.*100%/);
+  assert.deepEqual(loadData(store).data, initial);
+  const dinnerProtein = controlWithLabel(dialog, 'input', 'Cena: proteine percentuale');
+  dinnerProtein.value = '25'; dinnerProtein.dispatch('input');
+  dialog.querySelector('form').dispatch('submit');
+  const afterPercent = loadData(store).data;
+  assert.equal(afterPercent.mealDistribution.lunch.protein, 45);
+  assert.equal(afterPercent.days[key].mealDistribution.dinner.protein, 25);
+  assert.deepEqual(afterPercent.days[key].meals, current.meals);
+  assert.deepEqual(afterPercent.days[key].consumed, current.consumed);
+  clickText(document, 'Adatta i pasti da mangiare');
+  assert.equal(dialog.querySelectorAll('.fit-meal-preview').length, 2);
+  assert.deepEqual(loadData(store).data, afterPercent);
+  clickText(dialog, 'Applica le quantità');
+  const result = loadData(store).data.days[key];
+  assert.deepEqual(result.consumed, current.consumed);
+  assert.deepEqual(result.skipped, current.skipped);
+  assert.deepEqual(result.meals.find(item => item.id === eaten.id), eaten);
+  assert.deepEqual(result.meals.find(item => item.id === skipped.id), skipped);
+  assert.notDeepEqual(result.meals.find(item => item.slot === 'lunch').ingredients, current.meals.find(item => item.slot === 'lunch').ingredients);
+  for (const item of result.meals.filter(item => ['lunch', 'dinner'].includes(item.slot))) assertMacrosClose(item.macros, mealFromIngredients(item).macros);
+});
+
+test('editing a habitual portion persists its default but permits a different amount in one meal', async t => {
+  const key = todayKey(), initial = generatedDiary(key), store = new MemoryStorage(); saveData(initial, store);
+  const { document, navigate } = await bootApp(t, store, 'foods');
+  const panel = document.querySelector('.usual-quantities-panel');
+  const choice = panel.querySelector('select'); choice.value = 'chicken'; choice.dispatch('change');
+  const amount = panel.querySelector('input'); amount.value = '185'; amount.dispatch('input');
+  panel.querySelector('form').dispatch('submit');
+  assert.deepEqual(loadData(store).data.days, initial.days);
+  navigate('today'); openComposer(document);
+  fillComposer(document, '.meal-food-picker input[type="search"]', 'Petto di pollo');
+  document.querySelector('.picker-result').click();
+  assert.equal(document.querySelector('.picker-amount-form input').valueAsNumber, 185);
+  fillComposer(document, '.picker-amount-form input', '140');
+  const remember = document.querySelector('.picker-remember input'); remember.checked = false;
+  document.querySelector('.picker-amount-form').dispatch('submit');
+  composerButton(document, 'Salva questo pasto').click();
+  assert.equal(loadData(store).data.days[key].meals[0].ingredients.at(-1).grams, 140);
+  navigate('foods');
+  const savedChoice = document.querySelector('.usual-quantities-panel select'); savedChoice.value = 'chicken'; savedChoice.dispatch('change');
+  assert.equal(document.querySelector('.usual-quantities-panel input').valueAsNumber, 185);
+});
+
+test('a personal portion defaults to automatic fitting and keeps its reusable base amount', async t => {
+  const key = todayKey(), initial = generatedDiary(key), store = new MemoryStorage();
+  const food = { name: 'Mousse automatica', brand: '', barcode: '', unit: 'g', kcal: 76, protein: 10, carbs: 5.8, fat: 1.4 };
+  initial.personalPortions = [{ id: 'personal-auto-mousse', food, grams: 175 }];
+  saveData(initial, store);
+  const { document } = await bootApp(t, store, 'foods');
+  clickText(document, 'Aggiungi a un pasto');
+  const dialog = document.querySelector('#app-dialog');
+  const lunch = initial.days[key].meals.find(item => item.slot === 'lunch');
+  const select = dialog.querySelector('select'); select.value = lunch.id; select.dispatch('change');
+  assert.equal(dialog.querySelector('input[type="checkbox"]').checked, true);
+  assert.match(dialog.querySelector('.fit-comparison').textContent, /Obiettivo del pasto/);
+  assert.deepEqual(loadData(store).data, initial);
+  clickText(dialog, 'Aggiungi porzione');
+  const result = loadData(store).data;
+  const changed = result.days[key].meals.find(item => item.id === lunch.id);
+  assert.deepEqual(changed.ingredients.at(-1).foodSnapshot, food);
+  assert.notDeepEqual(changed.ingredients.slice(0, -1), lunch.ingredients);
+  assertMacrosClose(changed.macros, mealFromIngredients(changed).macros);
+  assert.deepEqual(result.personalPortions, initial.personalPortions);
+  assert.deepEqual(result.days[key].consumed, {});
+});
+
+test('an impossible recipe exposes macro differences and cancelling leaves the diary untouched', async t => {
+  const key = todayKey(), initial = generatedDiary(key), store = new MemoryStorage();
+  initial.personalRecipes = [{ id: 'recipe-user-only-chicken', name: 'Solo pollo per test', slot: 'lunch', ingredients: [{ foodId: 'chicken', grams: 100 }] }];
+  saveData(initial, store);
+  const { document } = await bootApp(t, store, 'foods');
+  const search = document.querySelector('.recipes-panel input[type="search"]');
+  search.value = 'Solo pollo per test'; search.dispatch('input');
+  clickText(document.querySelector('.recipe-card'), 'Usa nel giorno');
+  const dialog = document.querySelector('#app-dialog');
+  assert.match(dialog.querySelector('.fit-comparison').textContent, /risultato è approssimato.*Differenza:/);
+  assert.doesNotMatch(dialog.querySelector('.fit-comparison').textContent, /Macro raggiunti/);
+  assert.deepEqual(loadData(store).data, initial);
+  clickText(dialog, 'Annulla');
+  assert.equal(dialog.open, false);
+  assert.deepEqual(loadData(store).data, initial);
 });

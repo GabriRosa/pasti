@@ -1,5 +1,8 @@
+import { BASE_RECIPES, BASE_RECIPE_FOODS } from './src/base-recipes.js?v=20261027-recipes';
+import { renderRecipeLibrary } from './src/recipes-ui.js?v=20261027-recipes';
+import { DEFAULT_MEAL_DISTRIBUTION, validateMealDistribution, remainingMealTargets, fitRecipeIngredients } from './src/recipe-fitting.js?v=20261027-recipes';
 import { foodQuantityKey, usualFoodQuantity } from './src/food-quantities.js?v=20261027-barcode-quantities';
-import { createMealFoodPicker } from './src/meal-food-picker.js?v=20261027-barcode-quantities';
+import { createMealFoodPicker } from './src/meal-food-picker.js?v=20261027-recipes';
 import { MACRO_CHART_KEYS, macroGrams, macroChartSvg } from './src/macro-chart.js?v=20261027-neutral';
 import { renderPortions } from './src/portions-ui.js?v=20261027-neutral';
 import { ACTIVITY_LEVELS, calculateTargets, sumMacros } from './src/nutrition.js?v=20261027-neutral';
@@ -7,7 +10,7 @@ import { FOODS, LIDL_FOOD_IDS, getFood, getIngredientFood, ingredientMacros } fr
 import { createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } from './src/planner.js?v=20261027-meal-times';
 import { trainingForDate, validateTrainingPlan, TRAINING_LOG_TYPES, validateTrainingLog, trainingLogLabel } from './src/training.js?v=20261027-neutral';
 import { parseActivityCsv, suggestActivityColumns, summarizeActivityCsv } from './src/activity-import.js?v=20261027-neutral';
-import { STORAGE_KEY, MAX_BACKUP_BYTES, createEmptyData, validateData, parseBackup, loadData, saveData, exportBackup, clearData } from './src/storage.js?v=20261027-barcode-quantities';
+import { STORAGE_KEY, MAX_BACKUP_BYTES, createEmptyData, validateData, validateRecipe, parseBackup, loadData, saveData, exportBackup, clearData } from './src/storage.js?v=20261027-recipes';
 import { createPersistentHealthClient } from './src/google-health-persistent.js?v=20261027-persistent2';
 import { GOOGLE_HEALTH_CLIENT_ID, GOOGLE_HEALTH_PERSISTENT } from './src/google-health-config.js?v=20261027-persistent2';
 import { createGoogleHealthSession } from './src/google-health-session.js?v=20261027-persistent2';
@@ -35,6 +38,7 @@ let toastTimer;
 let returnFocus;
 let healthRenderQueued = false;
 let disposePortions;
+let disposeRecipes;
 let disposeMealEditor;
 const healthSession = createGoogleHealthSession({ clientId: GOOGLE_HEALTH_CLIENT_ID, persistent: GOOGLE_HEALTH_PERSISTENT ? createPersistentHealthClient() : null, onChange: () => {
   if (healthRenderQueued) return;
@@ -88,6 +92,7 @@ function getDay() {
       profileSnapshot: clone(data.profile), targets,
       meals: createDayPlan(data.profile, targets, selectedDate, data.foodOverrides),
       consumed: {}, skipped: [],
+      ...(data.mealDistribution ? { mealDistribution: clone(data.mealDistribution) } : {}),
     };
     persist(next);
   }
@@ -142,6 +147,7 @@ function storageNotice() {
 }
 
 function render() {
+  disposeRecipes?.(); disposeRecipes = null;
   disposeMealEditor?.(); disposeMealEditor = null;
   disposePortions?.(); disposePortions = null;
   const hash = location.hash.slice(1);
@@ -526,6 +532,7 @@ function renderToday() {
       h('span', { class: 'day-subtitle' }, h('span', {}, longDate(selectedDate)), button('Vai ai pasti ↓', goToMeals, 'button primary small', { 'aria-controls': 'daily-meals-title' })), dateNavigation),
     renderTrainingLog(day, activity),
     renderGoogleHealth(),
+    h('details', { class: 'daily-distribution' }, h('summary', {}, 'Distribuzione dei macro e quantità automatiche'), renderDistributionPanel()),
     selectedDate >= localDate() && profileKey(day.profileSnapshot) !== profileKey(data.profile) && day.meals.some(meal => !day.consumed[meal.id] && !day.skipped.includes(meal.id)) && h('section', { class: 'notice profile-change-notice' }, h('strong', {}, 'Questo giorno usa ancora il profilo precedente.'), h('p', {}, 'Il nuovo profilo è salvato. Puoi applicarlo ai piani da oggi in poi, mantenendo i pasti già registrati.'), button('Applica il profilo ai piani', applyProfileToPlans)),
     renderEnergyContext(day.targets),
     day.profileSnapshot.routineNotes && h('details', { class: 'panel routine-notes' }, h('summary', {}, 'La tua attività e le preferenze'), h('p', { style: 'white-space:pre-wrap' }, day.profileSnapshot.routineNotes)),
@@ -618,6 +625,7 @@ function editMeal(original) {
   let draft = clone(original);
   const pendingPortions = [];
   const pendingQuantities = {};
+  let fitted = false;
   const quantities = () => ({ ...data.usualQuantities, ...pendingQuantities });
   const rememberQuantity = (id, food, grams) => {
     if (!Number.isFinite(grams) || grams < 0.1 || grams > 3000) throw new Error('Inserisci una quantità abituale tra 0,1 e 3.000.');
@@ -632,6 +640,8 @@ function editMeal(original) {
   const controls = h('div', { class: 'swap-fields' });
   const adaptation = h('div', { class: 'portion-update', 'aria-live': 'polite', 'aria-atomic': 'true', hidden: true });
   const alternatives = mealAlternatives(original, data.days[selectedDate].targets, data.foodOverrides);
+  const recipes = allRecipes();
+  const fitStatus = h('div');
   const showAdaptation = before => {
     const quantities = meal => meal.ingredients.reduce((map, item) => map.set(item.foodId, (map.get(item.foodId) || 0) + item.grams), new Map());
     const previous = quantities(before);
@@ -653,6 +663,7 @@ function editMeal(original) {
     } catch (error) { values.replaceChildren(); errors.textContent = error.message; }
   };
   const rebuild = () => {
+    fitStatus.replaceChildren();
     controls.replaceChildren();
     if (['lunch', 'dinner'].includes(draft.slot)) {
       for (const [label, ids] of [['Carboidrato', CARBS], ['Proteina', PROTEINS]]) {
@@ -669,6 +680,7 @@ function editMeal(original) {
     ingredientFields.replaceChildren(...draft.ingredients.map((ingredient, index) => {
       const food = getIngredientFood(ingredient, data.foodOverrides);
       const grams = h('input', { id: `ingredient-${index}`, type: 'number', min: '0', max: '3000', step: '0.1', inputmode: 'decimal', value: Number.isFinite(ingredient.grams) ? Number(ingredient.grams.toFixed(1)) : '', 'aria-label': `${food.name}, ${food.unit === 'ml' ? 'millilitri' : 'grammi'}`, oninput: event => {
+        fitStatus.replaceChildren();
         adaptation.hidden = true;
         adaptation.replaceChildren();
         const value = event.target.valueAsNumber;
@@ -690,8 +702,8 @@ function editMeal(original) {
   };
   const picker = createMealFoodPicker({ h, field, button,
     getFoods: () => [
-      ...[...(data.personalPortions || []), ...pendingPortions].map(portion => ({ ...portion, personal: true, grams: usualFoodQuantity(portion.id, portion.food, quantities(), portion.grams) })),
-      ...FOODS.map(food => ({ id: food.id, food: getFood(food.id, data.foodOverrides), grams: usualFoodQuantity(food.id, food, quantities()) })),
+      ...pendingPortions.map(portion => ({ ...portion, personal: true })),
+      ...recipeFoods(),
     ],
     getUsualQuantity: (id, food, fallback) => usualFoodQuantity(id, food, quantities(), fallback),
     add: (ingredient, portion, habitual) => {
@@ -706,13 +718,28 @@ function editMeal(original) {
   });
   const variantSelect = h('select', { 'aria-label': 'Scegli un’alternativa completa', onchange: event => {
     if (event.target.value === '') return;
+    if (event.target.value.startsWith('recipe:')) {
+      try {
+        const recipe = recipes.find(item => item.id === event.target.value.slice(7));
+        const result = fitForSlot(data.days[selectedDate], original, recipe.ingredients, distributionFor(data.days[selectedDate]), fitModeFor(recipe.name));
+        const before = clone(draft); draft = { ...original, title: recipe.name, ingredients: result.ingredients, note: '' };
+        fitted = true; rebuild(); showAdaptation(before); fitStatus.replaceChildren(fitComparison(result));
+      } catch (e) { errors.textContent = e.message; }
+      return;
+    }
+    fitStatus.replaceChildren();
     const index = Number(event.target.value);
     const choice = index === -1 ? original : alternatives[index];
     if (choice) { const before = clone(draft); draft = clone(choice); draft.id = original.id; draft.slot = original.slot; draft.time = original.time; rebuild(); showAdaptation(before); }
-  } }, h('option', { value: '' }, 'Scegli un’alternativa…'), h('option', { value: '-1' }, 'Pasto originale'), ...alternatives.map((meal, index) => h('option', { value: index }, meal.title)));
+  } }, h('option', { value: '' }, 'Scegli un’alternativa…'), h('option', { value: '-1' }, 'Pasto originale'), ...alternatives.map((meal, index) => h('option', { value: index }, meal.title)), h('optgroup', { label: 'Le tue ricette · quantità automatiche' }, ...recipes.map(recipe => h('option', { value: `recipe:${recipe.id}` }, recipe.name))));
   container.append(dialogHeading('Componi il tuo pasto', 'Aggiungi alimenti, scegli le quantità e controlla i macro.'), field('Alternative del pasto', variantSelect, original.slot === 'breakfast' ? 'Tra le colazioni: budino proteico, mousse proteica e yogurt greco con cioccolato.' : null), controls,
     ['lunch', 'dinner'].includes(original.slot) ? h('p', { class: 'swap-explanation' }, 'Cambiando alimento si adattano anche la porzione di carne, pesce o uova e l’olio. Le proteine di pasta e legumi sono già conteggiate.') : document.createDocumentFragment(),
-    adaptation, ingredientFields, picker.element,
+    button('Calcola quantità per i miei macro', () => { try {
+      const before = clone(draft); const result = fitForSlot(data.days[selectedDate], draft, draft.ingredients);
+      fitted = true;
+      draft.ingredients = result.ingredients; rebuild(); showAdaptation(before); fitStatus.replaceChildren(fitComparison(result));
+    } catch (e) { errors.textContent = e.message; } }, 'button secondary'),
+    adaptation, fitStatus, ingredientFields, picker.element,
     h('p', { class: 'helper' }, 'Pesi della parte edibile: crudo o secco, salvo la nota dell’alimento. Per uova e albumi usa i grammi effettivi.'), values, errors,
     h('div', { class: 'dialog-actions' }, button('Annulla', closeDialog), button('Salva questo pasto', () => {
       if (!draft.ingredients.length) { errors.textContent = 'Aggiungi almeno un ingrediente al pasto.'; return; }
@@ -722,6 +749,7 @@ function editMeal(original) {
         draft = mealFromIngredients(draft, data.foodOverrides);
         if (updateDay((day, next) => {
           if (day.consumed[original.id]) throw new Error('Questo pasto è già stato registrato.');
+          if (fitted) day.mealDistribution = clone(distributionFor(day));
           day.meals = day.meals.map(meal => meal.id === original.id ? clone(draft) : meal);
           const retained = pendingPortions.filter(portion => draft.ingredients.some(item => item.foodId === portion.id));
           if (retained.length) next.personalPortions = [...(next.personalPortions || []), ...retained];
@@ -1080,6 +1108,174 @@ function labelReference(item) {
     h('a', { href: label.evidenceUrl, target: '_blank', rel: 'noopener noreferrer' }, 'Vedi l’etichetta ↗'));
 }
 
+const RECIPE_SLOTS = [
+  { id: 'preworkout', label: 'Prima dell’allenamento' }, { id: 'breakfast', label: 'Colazione' },
+  { id: 'lunch', label: 'Pranzo' }, { id: 'dinner', label: 'Cena' },
+];
+const PASTI_RECIPES = [
+  ['banana', 'Banana prima dell’allenamento', 'preworkout', [['banana', 120]]],
+  ['bread-jam', 'Pane e confettura', 'preworkout', [['bread', 30], ['jam', 10]]],
+  ['shake', 'Shaker, yogurt e cioccolato fondente', 'breakfast', [['skim-milk', 250], ['whey', 30], ['greek-yogurt-fage', 150], ['oats', 20], ['chocolate-85', 30], ['apple', 150]]],
+  ['chicken', 'Pasta al pomodoro con pollo', 'lunch', [['pasta', 90], ['chicken', 120], ['passata', 150], ['vegetables', 250], ['olive-oil', 30]]],
+  ['cod', 'Riso e merluzzo con verdure', 'dinner', [['rice', 65], ['cod', 220], ['vegetables', 250], ['olive-oil', 30], ['apple', 150]]],
+].map(([id, name, slot, ingredients]) => ({ id: `recipe-pasti-${id}`, name, slot, ingredients: ingredients.map(([foodId, grams]) => ({ foodId, grams })), source: 'Piano Pasti' }));
+function allRecipes() {
+  const recipes = new Map([...BASE_RECIPES, ...PASTI_RECIPES].map(recipe => [recipe.id, recipe]));
+  for (const recipe of data.personalRecipes || []) recipes.set(recipe.id, recipe);
+  return [...recipes.values()];
+}
+function recipeFoods() {
+  const items = [...(data.personalPortions || []).map(portion => ({ ...portion, personal: true })),
+    ...FOODS.map(food => ({ id: food.id, food: getFood(food.id, data.foodOverrides), grams: 100 })),
+    ...BASE_RECIPE_FOODS,
+    ...(data.personalRecipes || []).flatMap(recipe => recipe.ingredients.filter(item => item.foodSnapshot).map(item => ({ id: item.foodId, food: item.foodSnapshot, grams: item.grams, personal: true })))];
+  const unique = new Map();
+  for (const item of items) if (!unique.has(item.id)) unique.set(item.id, { ...item, grams: usualFoodQuantity(item.id, item.food, data.usualQuantities, item.grams) });
+  return [...unique.values()];
+}
+function saveRecipe(recipe) {
+  validateRecipe(recipe);
+  const next = clone(data);
+  next.personalRecipes = [...(next.personalRecipes || []).filter(item => item.id !== recipe.id), clone(recipe)];
+  persist(next);
+  if (unsaved) throw new Error('Ricetta presente solo in memoria: scarica un backup per conservarla.');
+}
+const distributionFor = day => day?.mealDistribution || data.mealDistribution || DEFAULT_MEAL_DISTRIBUTION;
+const macroSummary = values => `P ${formatDecimal(values.protein)} g · C ${formatDecimal(values.carbs)} g · G ${formatDecimal(values.fat)} g`;
+const fitModeFor = name => /tort|pane|pizza|muffin|pancake|crêp|crep|waff|biscott|focacc|brownie|plumcake/i.test(name) ? 'proportional' : 'balanced';
+function fitForSlot(day, meal, ingredients, distribution = distributionFor(day), mode = fitModeFor(meal.title || '')) {
+  const target = remainingMealTargets(day, distribution)[meal.slot];
+  if (!target) throw new Error('Questo pasto è già consumato o saltato.');
+  return { ...fitRecipeIngredients(ingredients, target, data.foodOverrides, { mode }), target };
+}
+function fitComparison(result) {
+  return h('div', { class: 'fit-comparison' },
+    h('p', {}, h('strong', {}, 'Obiettivo del pasto: '), macroSummary(result.target)),
+    h('p', {}, h('strong', {}, 'Con queste quantità: '), `${round(result.macros.kcal)} kcal · ${macroSummary(result.macros)}`),
+    h('p', { class: result.matched ? 'helper' : 'notice compact', role: 'status' }, result.matched
+      ? 'Macro raggiunti entro l’arrotondamento delle quantità.'
+      : `Con questi ingredienti il risultato è approssimato. Differenza: ${['protein', 'carbs', 'fat'].map((key, i) => `${['P', 'C', 'G'][i]} ${result.deviation[key] > 0 ? '+' : ''}${formatDecimal(result.deviation[key])} g`).join(' · ')}. Puoi cambiare ingredienti o quantità.`));
+}
+function ingredientList(ingredients) {
+  return h('ul', { class: 'recipe-ingredient-preview' }, ...ingredients.map(item => {
+    const food = getIngredientFood(item, data.foodOverrides);
+    return h('li', {}, `${food.name} · ${formatDecimal(item.grams)} ${food.unit}`);
+  }));
+}
+function renderDistributionPanel() {
+  const distribution = distributionFor(data.days[selectedDate]);
+  return h('section', { class: 'panel distribution-panel' },
+    h('div', { class: 'section-heading' }, h('div', {}, h('h2', {}, 'I macro nei tuoi pasti'),
+      h('p', {}, 'Scegli quanta parte di proteine, carboidrati e grassi assegnare a ciascun pasto.'))),
+    h('div', { class: 'distribution-table-wrap' }, h('table', { class: 'distribution-table' },
+      h('thead', {}, h('tr', {}, ...['Pasto', 'Proteine', 'Carboidrati', 'Grassi'].map(label => h('th', { scope: 'col' }, label)))),
+      h('tbody', {}, ...RECIPE_SLOTS.map(slot => h('tr', {}, h('th', { scope: 'row' }, slot.label),
+        ...['protein', 'carbs', 'fat'].map(key => h('td', {}, `${formatDecimal(distribution[slot.id][key])}%`))))))),
+    h('p', { class: 'helper' }, 'I macro già mangiati vengono sottratti. Le quote dei pasti saltati o assenti si distribuiscono tra quelli ancora da mangiare.'),
+    h('div', { class: 'form-actions' }, button('Modifica percentuali', openDistributionEditor, 'button secondary'),
+      data.profile && button('Adatta i pasti da mangiare', openDayFit, 'button primary')));
+}
+function openDistributionEditor() {
+  const existing = clone(distributionFor(data.days[selectedDate]));
+  const inputs = {};
+  const error = h('p', { class: 'form-error', role: 'alert' });
+  const totals = h('p', { role: 'status', class: 'helper' });
+  const read = () => Object.fromEntries(RECIPE_SLOTS.map(slot => [slot.id, Object.fromEntries(['protein', 'carbs', 'fat'].map(key => [key, inputs[`${slot.id}-${key}`].value === '' ? NaN : inputs[`${slot.id}-${key}`].valueAsNumber]))]));
+  const update = () => { const draft = read(); totals.textContent = ['protein', 'carbs', 'fat'].map((key, i) => `${['Proteine', 'Carboidrati', 'Grassi'][i]}: ${formatDecimal(RECIPE_SLOTS.reduce((sum, slot) => sum + (Number.isFinite(draft[slot.id][key]) ? draft[slot.id][key] : 0), 0))}%`).join(' · '); };
+  const form = h('form', { oninput: update, onsubmit: event => {
+    event.preventDefault(); if (!form.reportValidity()) return;
+    try {
+      const distribution = validateMealDistribution(read());
+      const next = clone(data); next.mealDistribution = distribution;
+      if (next.days[selectedDate]) { next.days[selectedDate].mealDistribution = clone(distribution); next.days[selectedDate].updatedAt = new Date().toISOString(); }
+      persist(next); closeDialog(); render(); notify(unsaved ? 'Percentuali solo in memoria: scarica un backup.' : 'Percentuali salvate. Usa “Adatta i pasti da mangiare” per applicarle alle quantità.');
+    } catch (e) { error.textContent = e.message; }
+  } }, h('div', { class: 'distribution-table-wrap' }, h('table', { class: 'distribution-table' },
+    h('thead', {}, h('tr', {}, ...['Pasto', 'Proteine %', 'Carboidrati %', 'Grassi %'].map(label => h('th', { scope: 'col' }, label)))),
+    h('tbody', {}, ...RECIPE_SLOTS.map(slot => h('tr', {}, h('th', { scope: 'row' }, slot.label), ...['protein', 'carbs', 'fat'].map((key, i) => {
+      const input = h('input', { type: 'number', min: 0, max: 100, step: '0.1', required: true, inputmode: 'decimal', value: existing[slot.id][key], 'aria-label': `${slot.label}: ${['proteine', 'carboidrati', 'grassi'][i]} percentuale` });
+      inputs[`${slot.id}-${key}`] = input; return h('td', {}, input);
+    })))))), totals, h('p', { class: 'helper' }, 'Ogni colonna deve arrivare al 100%. Le quote si salvano per questo giorno e come impostazione dei nuovi giorni; i pasti già mangiati restano invariati.'), error,
+    h('div', { class: 'dialog-actions' }, button('Annulla', closeDialog), h('button', { type: 'submit', class: 'button primary' }, 'Salva percentuali')));
+  showDialog(h('div', { class: 'dialog-content' }, dialogHeading('Distribuisci i macro', longDate(selectedDate)), form)); update();
+}
+function openDayFit() {
+  try {
+    const day = getDay();
+    const guard = JSON.stringify(day);
+    const results = day.meals.filter(meal => !day.consumed[meal.id] && !day.skipped.includes(meal.id)).map(meal => ({ meal, result: fitForSlot(day, meal, meal.ingredients) }));
+    if (!results.length) { notify('Non ci sono pasti da adattare in questo giorno.'); return; }
+    const error = h('p', { class: 'form-error', role: 'alert' });
+    showDialog(h('div', { class: 'dialog-content' }, dialogHeading('Quantità per i tuoi obiettivi', longDate(selectedDate)),
+      h('p', { class: 'helper' }, 'Anteprima dei pasti ancora da mangiare. Il calcolo usa solo gli ingredienti presenti: alcuni obiettivi possono richiedere una ricetta diversa.'),
+      ...results.map(({ meal, result }) => h('section', { class: 'fit-meal-preview' }, h('h3', {}, RECIPE_SLOTS.find(slot => slot.id === meal.slot).label), fitComparison(result), ingredientList(result.ingredients))), error,
+      h('div', { class: 'dialog-actions' }, button('Annulla', closeDialog), button('Applica le quantità', () => {
+        if (JSON.stringify(data.days[selectedDate]) !== guard) { error.textContent = 'Il giorno è cambiato. Riapri l’anteprima per ricalcolare.'; return; }
+        if (updateDay(target => {
+          target.mealDistribution = clone(distributionFor(day));
+          target.meals = target.meals.map(meal => { const item = results.find(item => item.meal.id === meal.id); return item ? mealFromIngredients({ ...meal, ingredients: item.result.ingredients }, data.foodOverrides) : meal; });
+        })) { closeDialog(); notify('Quantità aggiornate. Controlla i totali pianificati del giorno.'); }
+      }, 'button primary'))));
+  } catch (e) { notify(e.message, true); }
+}
+function openRecipeUse(recipe) {
+  if (!data.profile) { notify('Completa prima il profilo per calcolare i tuoi obiettivi.', true); return; }
+  try {
+    const day = getDay(); const guard = JSON.stringify(day);
+    const available = day.meals.filter(meal => !day.consumed[meal.id] && !day.skipped.includes(meal.id));
+    if (!available.length) { notify('Non ci sono pasti da modificare. Scegli un’altra data in Oggi.', true); return; }
+    const choice = h('select', { 'aria-label': 'Pasto per la ricetta' }, ...available.map(meal => h('option', { value: meal.id, selected: meal.slot === recipe.slot }, `${meal.time} · ${RECIPE_SLOTS.find(slot => slot.id === meal.slot).label}`)));
+    const mode = h('select', { 'aria-label': 'Metodo di adattamento ricetta' }, h('option', { value: 'balanced', selected: fitModeFor(recipe.name) === 'balanced' }, 'Adatta i singoli ingredienti ai macro'), h('option', { value: 'proportional', selected: fitModeFor(recipe.name) === 'proportional' }, 'Mantieni le proporzioni della ricetta'));
+    const preview = h('div'); const error = h('p', { class: 'form-error', role: 'alert' });
+    let result, selected;
+    const update = () => { try {
+      selected = available.find(meal => meal.id === choice.value) || available[0];
+      result = fitForSlot(day, selected, recipe.ingredients, distributionFor(day), mode.value);
+      preview.replaceChildren(fitComparison(result), ingredientList(result.ingredients)); error.textContent = '';
+    } catch (e) { result = null; error.textContent = e.message; } };
+    choice.addEventListener('change', update); mode.addEventListener('change', update); update();
+    showDialog(h('div', { class: 'dialog-content' }, dialogHeading(recipe.name, `Scegli il pasto del ${longDate(selectedDate)}. Per un’altra data usa il diario Oggi.`),
+      field('Sostituisci il pasto', choice), field('Come adattare le quantità', mode, 'Per impasti e dolci conviene mantenere le proporzioni. Con ingredienti adattati, aromi e piccole quantità rimangono fissi.'), preview, error,
+      h('p', { class: 'helper' }, 'Questa scelta sostituisce gli ingredienti del pasto. La ricetta base rimane uguale e le quantità del giorno sono sempre modificabili.'),
+      h('div', { class: 'dialog-actions' }, button('Annulla', closeDialog), button('Usa queste quantità', () => {
+        if (!result) return;
+        if (JSON.stringify(data.days[selectedDate]) !== guard) { error.textContent = 'Il giorno è cambiato. Riapri la ricetta per ricalcolare.'; return; }
+        if (updateDay(target => {
+          target.mealDistribution = clone(distributionFor(day));
+          target.meals = target.meals.map(meal => meal.id === selected.id ? mealFromIngredients({ ...meal, title: recipe.name, ingredients: result.ingredients, note: '' }, data.foodOverrides) : meal);
+        })) { closeDialog(); notify('Ricetta inserita con le quantità calcolate.'); }
+      }, 'button primary'))));
+  } catch (e) { notify(e.message, true); }
+}
+function renderRecipes() {
+  const panel = renderRecipeLibrary({ h, field, button, getRecipes: allRecipes, getFoods: recipeFoods,
+    getFoodForIngredient: item => getIngredientFood(item, data.foodOverrides),
+    onSave: saveRecipe, onUse: openRecipeUse, onError: message => notify(message, true) });
+  panel.element.append(h('p', { class: 'helper' }, 'Include 195 ricette da ', h('a', { href: 'https://gabrirosa.github.io/cibo-sano/', target: '_blank', rel: 'noopener noreferrer' }, 'Cibo Sano'), '. Dati CoFID: Crown copyright, ', h('a', { href: 'https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/', target: '_blank', rel: 'noopener noreferrer' }, 'Open Government Licence v3.0'), '.'));
+  disposeRecipes = panel.dispose; return panel.element;
+}
+
+function renderUsualQuantities() {
+  const foods = recipeFoods();
+  const chosen = h('select', { 'aria-label': 'Alimento per quantità abituale' }, ...foods.map(item => h('option', { value: item.id }, item.food.name)));
+  const amount = h('input', { type: 'number', min: 0.1, max: 3000, step: 0.1, required: true, inputmode: 'decimal', 'aria-label': 'Quantità abituale' });
+  const unit = h('span'); const summary = h('p', { class: 'helper', role: 'status' }); const error = h('p', { class: 'form-error', role: 'alert' });
+  const selected = () => foods.find(item => item.id === chosen.value) || foods[0];
+  const refresh = () => { const item = selected(); amount.value = usualFoodQuantity(item.id, item.food, data.usualQuantities, item.grams ?? 100); unit.textContent = item.food.unit; };
+  chosen.addEventListener('change', refresh); refresh();
+  const form = h('form', { onsubmit: event => {
+    event.preventDefault(); if (!form.reportValidity()) return;
+    try {
+      const item = selected(); const key = foodQuantityKey(item.id, item.food); const grams = amount.valueAsNumber;
+      const next = clone(data); next.usualQuantities = { ...next.usualQuantities, [key]: { grams, unit: item.food.unit } };
+      if (next.personalPortions) next.personalPortions = next.personalPortions.map(portion => foodQuantityKey(portion.id, portion.food) === key ? { ...portion, grams } : portion);
+      persist(next); error.textContent = ''; summary.textContent = unsaved ? 'Modifica solo in memoria: scarica un backup.' : `Quantità abituale salvata: ${item.food.name}, ${formatDecimal(grams)} ${item.food.unit}.`;
+    } catch (e) { error.textContent = e.message; }
+  } }, h('div', { class: 'form-grid' }, field('Alimento', chosen), field('Quantità abituale', h('div', { class: 'gram-control' }, amount, unit))),
+    error, h('button', { type: 'submit', class: 'button secondary' }, 'Salva quantità abituale'), summary);
+  return h('section', { class: 'panel usual-quantities-panel' }, h('h2', {}, 'Le mie quantità abituali'),
+    h('p', {}, 'Modifica la porzione proposta quando aggiungi un alimento. Nel diario puoi usare ogni volta una quantità diversa.'), form);
+}
 function renderPersonalPortions() {
   const panel = renderPortions({ h, field, button, getPortions: () => data.personalPortions ?? [],
     reportError: message => notify(message, true),
@@ -1106,19 +1302,24 @@ function renderPersonalPortions() {
         const available = day.meals.filter(meal => !day.consumed[meal.id] && !day.skipped.includes(meal.id));
         if (!available.length) { notify('Tutti i pasti di questo giorno sono già registrati o saltati. Scegli un altro giorno nel diario.', true); return; }
         const choice = h('select', {}, ...available.map(meal => h('option', { value: meal.id }, `${meal.time} · ${meal.title}`)));
-        const preview = h('p', { class: 'notice compact' });
+        const preview = h('div');
+        const adapt = h('input', { type: 'checkbox', checked: true });
+        let portionFit;
         const updated = () => {
           const original = day.meals.find(meal => meal.id === choice.value);
-          return mealFromIngredients({ ...original, ingredients: [...original.ingredients, { foodId: portion.id, grams: portion.grams, foodSnapshot: clone(portion.food) }] }, data.foodOverrides);
+          const ingredients = [...original.ingredients, { foodId: portion.id, grams: portion.grams, foodSnapshot: clone(portion.food) }];
+          portionFit = adapt.checked ? fitForSlot(day, original, ingredients) : null;
+          return mealFromIngredients({ ...original, ingredients: portionFit ? portionFit.ingredients : ingredients }, data.foodOverrides);
         };
-        const refresh = () => { const m = updated().macros; preview.textContent = `Pasto dopo l’aggiunta: ${round(m.kcal)} kcal · P ${formatDecimal(m.protein)} g · C ${formatDecimal(m.carbs)} g · G ${formatDecimal(m.fat)} g`; };
-        choice.addEventListener('change', refresh); refresh();
+        const refresh = () => { const meal = updated(); preview.replaceChildren(portionFit ? fitComparison(portionFit) : h('p', {}, `Pasto dopo l’aggiunta: ${round(meal.macros.kcal)} kcal · ${macroSummary(meal.macros)}`), ingredientList(meal.ingredients)); };
+        choice.addEventListener('change', refresh); adapt.addEventListener('change', refresh); refresh();
         showDialog(h('div', { class: 'dialog-content' }, dialogHeading('Aggiungi la tua porzione', `${portion.food.name} · ${formatDecimal(portion.grams)} ${portion.food.unit} · ${longDate(selectedDate)}`),
-          field('Pasto del diario', choice), preview, h('p', { class: 'helper' }, 'La porzione si aggiunge agli ingredienti presenti. Puoi modificarli dal diario. Il pasto resterà da mangiare.'),
+          field('Pasto del diario', choice), h('label', { class: 'picker-remember' }, adapt, 'Adatta gli ingredienti ai macro del pasto'), preview, h('p', { class: 'helper' }, 'La porzione si aggiunge agli ingredienti presenti. Puoi modificarli dal diario. Il pasto resterà da mangiare.'),
           h('div', { class: 'dialog-actions' }, button('Annulla', closeDialog), button('Aggiungi porzione', () => {
             const result = updated();
             if (updateDay(target => {
               if (target.consumed[choice.value] || target.skipped.includes(choice.value)) throw new Error('Questo pasto non è più modificabile.');
+              if (adapt.checked) target.mealDistribution = clone(distributionFor(day));
               target.meals = target.meals.map(meal => meal.id === result.id ? result : meal);
             })) { closeDialog(); notify(unsaved ? 'Aggiunta solo in memoria: scarica un backup.' : 'Porzione aggiunta al pasto del diario.'); }
           }, 'button primary'))));
@@ -1150,7 +1351,7 @@ function renderFoods() {
     } catch (error) { formError.textContent = error.message; }
   });
   const portions = renderPersonalPortions();
-  return h('div', { class: 'page foods-page' }, pageTitle('QUELLO CHE MANGI', 'Alimenti e quantità.', 'Valori per 100 g, oppure per 100 ml di latte. La confezione che hai in mano è il riferimento.'), portions,
+  return h('div', { class: 'page foods-page' }, pageTitle('QUELLO CHE MANGI', 'Alimenti e quantità.', 'Modifica ricette e porzioni, poi calcola le quantità per i tuoi obiettivi.'), renderDistributionPanel(), renderRecipes(), renderUsualQuantities(), portions,
     h('section', { class: 'panel label-panel' }, h('div', { class: 'section-heading' }, h('div', {}, h('p', { class: 'eyebrow' }, 'IL RIFERIMENTO PER OGNI VARIANTE'), h('h2', {}, 'Etichette e valori nutrizionali'), h('p', {}, 'I valori delle varianti sono già inseriti. Puoi modificarli facoltativamente per una confezione diversa.'))), form),
     h('section', { class: 'panel refresh-panel' }, h('div', {}, h('h2', {}, 'Hai già pianificato i prossimi pasti?'), h('p', {}, 'Puoi aggiornarne i valori nutrizionali e le note di riferimento senza cambiare i grammi. I pasti mangiati, i giorni passati e le tue etichette personali restano invariati.')),
       button('Aggiorna i pasti da oggi in poi', refreshPlannedMeals, 'button secondary', { disabled: Boolean(storageReadError || storageConflict) })),

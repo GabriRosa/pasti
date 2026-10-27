@@ -1,7 +1,7 @@
 import { validatePersonalFood, normalizeBarcode, lookupProduct, createBarcodeScanner } from './barcode.js?v=20261027-neutral';
 
 // The picker only edits the meal draft. Persistence belongs to Save meal.
-export function createMealFoodPicker({ h, field, button, getFoods, add, getUsualQuantity = (_id, _food, fallback) => fallback }) {
+export function createMealFoodPicker({ h, field, button, getFoods, add, getUsualQuantity = (_id, _food, fallback) => fallback, allowRemember = true, context = 'meal' }) {
   let disposed = false, request, generation = 0;
   const root = h('section', { class: 'meal-food-picker', 'aria-label': 'Aggiungi ingredienti' });
   const results = h('div', { class: 'picker-results' });
@@ -69,10 +69,10 @@ export function createMealFoodPicker({ h, field, button, getFoods, add, getUsual
       event.preventDefault();
       if (!amount.checkValidity() || amount.value === '') { error.textContent = 'Inserisci una quantità tra 0,1 e 3.000.'; amount.reportValidity(); return; }
       try {
-        add({ foodId: item.id, grams: amount.valueAsNumber, ...(item.personal ? { foodSnapshot: { ...item.food } } : {}) }, null, remember.checked);
-        editor.replaceChildren(); status.textContent = `${item.food.name} aggiunto al pasto.`;
+        add({ foodId: item.id, grams: amount.valueAsNumber, ...(item.personal ? { foodSnapshot: { ...item.food } } : {}) }, null, allowRemember && remember.checked);
+        editor.replaceChildren(); status.textContent = `${item.food.name} aggiunto ${context === 'recipe' ? 'alla ricetta' : 'al pasto'}.`;
       } catch (e) { error.textContent = e.message; }
-    } }, h('h4', {}, item.food.name), field(`Quantità · ${item.food.unit}`, amount, item.food.unitNote), preview, h('label', { class: 'picker-remember' }, remember, 'Usa questa quantità come abituale'), error,
+    } }, h('h4', {}, item.food.name), field(`Quantità · ${item.food.unit}`, amount, item.food.unitNote), preview, allowRemember && h('label', { class: 'picker-remember' }, remember, 'Usa questa quantità come abituale'), error,
     h('div', { class: 'form-actions' }, h('button', { type: 'submit', class: 'button primary' }, 'Aggiungi ingrediente'), button('Annulla aggiunta', () => editor.replaceChildren()))));
     update(); amount.focus();
   }
@@ -98,8 +98,8 @@ export function createMealFoodPicker({ h, field, button, getFoods, add, getUsual
         const food = read();
         const id = newId;
         const ingredient = { foodId: id, grams: amount.valueAsNumber, foodSnapshot: food };
-        add(ingredient, remember.checked ? { id, food, grams: ingredient.grams } : null, remember.checked);
-        editor.replaceChildren(); status.textContent = `${food.name} aggiunto. Conferma con Salva questo pasto.`;
+        add(ingredient, allowRemember && remember.checked ? { id, food, grams: ingredient.grams } : null, allowRemember && remember.checked);
+        editor.replaceChildren(); status.textContent = `${food.name} aggiunto. Conferma con ${context === 'recipe' ? 'Salva ricetta' : 'Salva questo pasto'}.`;
       } catch (e) { error.textContent = e.message; }
     } }, h('h4', {}, food.barcode ? 'Alimento da codice a barre' : 'Nuovo alimento'),
     food.barcode && h('p', { class: 'helper' }, `Codice ${food.barcode}`),
@@ -109,7 +109,7 @@ export function createMealFoodPicker({ h, field, button, getFoods, add, getUsual
       inputs[key] = h('input', { type: 'number', min: 0, max, step: 'any', required: true, inputmode: 'decimal', 'data-metric': key, value: food[key] ?? '' });
       return field(label, inputs[key]);
     })), field(quantityLabel, amount), preview,
-    h('label', { class: 'picker-remember' }, remember, 'Salva alimento e quantità abituale'), error,
+    allowRemember && h('label', { class: 'picker-remember' }, remember, 'Salva alimento e quantità abituale'), error,
     h('div', { class: 'form-actions' }, h('button', { type: 'submit', class: 'button primary' }, 'Aggiungi nuovo alimento'), button('Annulla aggiunta', () => editor.replaceChildren())));
     editor.replaceChildren(form); update(); name.focus();
   }

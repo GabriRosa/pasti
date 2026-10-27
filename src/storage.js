@@ -1,3 +1,5 @@
+import { validateMealDistribution } from './recipe-fitting.js?v=20261027-recipes';
+import { getIngredientFood } from './foods.js?v=20261027-neutral';
 import { validatePersonalFood } from './barcode.js?v=20261027-neutral';
 import { calculateTargets } from './nutrition.js?v=20261027-neutral';
 import { validateTrainingPlan, validateTrainingLog } from './training.js?v=20261027-neutral';
@@ -95,6 +97,19 @@ function meal(value) {
   });
   macros(value.macros);
 }
+export function validateRecipe(value) {
+  keys(value, ['id', 'name', 'slot', 'ingredients', 'source'], 'ricetta');
+  if (typeof value.id !== 'string' || !/^recipe-[a-zA-Z0-9-]{1,90}$/.test(value.id)) fail('identificativo ricetta.');
+  text(value.name, 200, 'nome ricetta.');
+  if (value.source !== undefined) text(value.source, 500, 'fonte ricetta.', true);
+  meal({ id: value.id, slot: value.slot, title: value.name, time: '', ingredients: value.ingredients,
+    macros: { kcal: 0, protein: 0, carbs: 0, fat: 0 }, note: '' });
+  for (const item of value.ingredients) {
+    number(item.grams, 0.1, 3000, 'quantità della ricetta.');
+    getIngredientFood(item);
+  }
+  return value;
+}
 function targets(value) {
   keys(value, [...MACRO_KEYS, 'bmr', 'tdee', 'warnings', 'method'], 'obiettivi');
   for (const key of [...MACRO_KEYS, 'bmr', 'tdee']) number(value[key], 0, 100000, key);
@@ -103,11 +118,12 @@ function targets(value) {
   value.warnings.forEach(warning => text(warning, 2000, 'avviso.', true));
 }
 function day(value, key) {
-  keys(value, ['dateKey', 'createdAt', 'updatedAt', 'profileSnapshot', 'targets', 'meals', 'consumed', 'skipped', 'trainingLog'], 'giorno');
+  keys(value, ['dateKey', 'createdAt', 'updatedAt', 'profileSnapshot', 'targets', 'meals', 'consumed', 'skipped', 'trainingLog', 'mealDistribution'], 'giorno');
   dateKey(key);
   if (value.dateKey !== key) fail('data non corrispondente.');
   timestamp(value.createdAt); timestamp(value.updatedAt);
   validateProfile(value.profileSnapshot); targets(value.targets);
+  if (value.mealDistribution !== undefined) validateMealDistribution(value.mealDistribution);
   try { validateTrainingLog(value.trainingLog); } catch (error) { fail(error.message); }
   if (!Array.isArray(value.meals) || value.meals.length < 1 || value.meals.length > 4) fail('pasti del giorno.');
   value.meals.forEach(meal);
@@ -125,7 +141,7 @@ function day(value, key) {
 }
 export function validateData(data) {
   safeTree(data);
-  keys(data, ['schemaVersion', 'profile', 'foodOverrides', 'days', 'personalPortions', 'usualQuantities'], 'documento');
+  keys(data, ['schemaVersion', 'profile', 'foodOverrides', 'days', 'personalPortions', 'usualQuantities', 'personalRecipes', 'mealDistribution'], 'documento');
   if (data.schemaVersion !== SCHEMA_VERSION) fail('versione non supportata.');
   if (data.profile !== null) validateProfile(data.profile);
   object(data.foodOverrides, 'etichette alimentari.');
@@ -133,6 +149,16 @@ export function validateData(data) {
   for (const [id, values] of Object.entries(data.foodOverrides)) {
     text(id, 100, 'alimento personalizzato.'); macros(values);
     if (values.protein > 100 || values.carbs > 100 || values.fat > 100 || values.kcal > 1000) fail('etichetta per 100 g.');
+  }
+  if (data.mealDistribution !== undefined) validateMealDistribution(data.mealDistribution);
+  if (data.personalRecipes !== undefined) {
+    if (!Array.isArray(data.personalRecipes) || data.personalRecipes.length > 300) fail('massimo 300 ricette personali.');
+    const ids = new Set();
+    for (const recipe of data.personalRecipes) {
+      validateRecipe(recipe);
+      if (ids.has(recipe.id)) fail('ricette duplicate.');
+      ids.add(recipe.id);
+    }
   }
   if (data.personalPortions !== undefined) {
     if (!Array.isArray(data.personalPortions) || data.personalPortions.length > 200) fail('massimo 200 porzioni personali.');
