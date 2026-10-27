@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
-    "start": "python3 -m http.server 8766 --bind 127.0.0.1"
+    "start": "python3 -m http.server 8766 --bind 127.0.0.1",
+    "build:worker": "node scripts/build-worker.mjs"
   }
 }

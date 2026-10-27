@@ -3,3 +3,10 @@ node_modules/
 work/
 .tmp/
 *.log
+
+# Auth secrets, deployment identity and generated assets
+.dev.vars*
+.env*
+.wrangler/
+wrangler.local.jsonc
+dist/

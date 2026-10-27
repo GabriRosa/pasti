@@ -304,7 +304,7 @@ async function nutritionApp(t, api) {
   for (const [name, value] of Object.entries(globals)) Object.defineProperty(globalThis, name, { value, writable: true, configurable: true });
   t.after(async () => { window.dispatch('pagehide'); await tick(); for (const [name, descriptor] of previous) { if (descriptor) Object.defineProperty(globalThis, name, descriptor); else delete globalThis[name]; } });
   const url = new URL('../app.js', import.meta.url);
-  const source = (await readFile(url, 'utf8')).replace(/^import \{ GOOGLE_HEALTH_CLIENT_ID \} from [^;]+;$/m, `const GOOGLE_HEALTH_CLIENT_ID = ${JSON.stringify(CLIENT)};`)
+  const source = (await readFile(url, 'utf8')).replace(/^import \{ GOOGLE_HEALTH_CLIENT_ID, GOOGLE_HEALTH_PERSISTENT \} from [^;]+;$/m, `const GOOGLE_HEALTH_CLIENT_ID = ${JSON.stringify(CLIENT)}; const GOOGLE_HEALTH_PERSISTENT = false;`)
     .replace(/from (['"])(\.\/[^'"]+)\1/g, (_, quote, path) => `from ${quote}${new URL(path, url).href}${quote}`);
   await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}#nutrition-review-${++appVersion}`);
   await tick(); head.querySelector('script').dispatch('load'); await tick();

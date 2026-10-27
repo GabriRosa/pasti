@@ -8,8 +8,9 @@ import { createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } fr
 import { trainingForDate, validateTrainingPlan, TRAINING_LOG_TYPES, validateTrainingLog, trainingLogLabel } from './src/training.js?v=20261027-neutral';
 import { parseActivityCsv, suggestActivityColumns, summarizeActivityCsv } from './src/activity-import.js?v=20261027-neutral';
 import { STORAGE_KEY, MAX_BACKUP_BYTES, createEmptyData, validateData, parseBackup, loadData, saveData, exportBackup, clearData } from './src/storage.js?v=20261027-barcode-quantities';
-import { GOOGLE_HEALTH_CLIENT_ID } from './src/google-health-config.js?v=20261027-neutral';
-import { createGoogleHealthSession } from './src/google-health-session.js?v=20261027-neutral';
+import { createPersistentHealthClient } from './src/google-health-persistent.js?v=20261027-persistent';
+import { GOOGLE_HEALTH_CLIENT_ID, GOOGLE_HEALTH_PERSISTENT } from './src/google-health-config.js?v=20261027-persistent';
+import { createGoogleHealthSession } from './src/google-health-session.js?v=20261027-persistent';
 import { prepareGoogleHealthConsumedMeal } from './src/google-health-nutrition.js?v=20261027-neutral';
 
 const $ = selector => document.querySelector(selector);
@@ -35,7 +36,7 @@ let returnFocus;
 let healthRenderQueued = false;
 let disposePortions;
 let disposeMealEditor;
-const healthSession = createGoogleHealthSession({ clientId: GOOGLE_HEALTH_CLIENT_ID, onChange: () => {
+const healthSession = createGoogleHealthSession({ clientId: GOOGLE_HEALTH_CLIENT_ID, persistent: GOOGLE_HEALTH_PERSISTENT ? createPersistentHealthClient() : null, onChange: () => {
   if (healthRenderQueued) return;
   healthRenderQueued = true;
   Promise.resolve().then(() => { healthRenderQueued = false; if (page === 'today') updateGoogleHealthPanel(); });
@@ -233,7 +234,7 @@ function renderGoogleHealth() {
   const result = state.data?.dateKey === selectedDate ? state.data : null;
   const future = selectedDate > localDate();
   const authenticating = ['authorizing', 'verifying'].includes(state.status);
-  const status = ({ unconfigured: 'In configurazione', disconnected: 'Non collegato', authorizing: 'Autorizzazione in corso', verifying: 'Verifica account', connected: 'Sessione collegata', expired: 'Sessione scaduta', account_not_linked: 'Account da collegare' })[state.status] || 'Non disponibile';
+  const status = ({ unconfigured: 'In configurazione', disconnected: 'Non collegato', authorizing: 'Autorizzazione in corso', verifying: 'Verifica account', connected: GOOGLE_HEALTH_PERSISTENT ? 'Accesso mantenuto' : 'Sessione collegata', expired: 'Sessione scaduta', account_not_linked: 'Account da collegare' })[state.status] || 'Non disponibile';
   const dateTime = value => new Intl.DateTimeFormat('it-IT', { timeZone: 'Europe/Rome', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(value));
   const coverage = (seconds, value) => {
     if (!result.coverage.requestedSeconds) return 'In attesa del primo intervallo completo.';
@@ -243,17 +244,19 @@ function renderGoogleHealth() {
   };
   const controls = h('div', { class: 'health-actions' });
   if (state.status !== 'unconfigured') {
+    if (GOOGLE_HEALTH_PERSISTENT && state.error?.code === 'DISCONNECT_FAILED') controls.append(button('Riprova disconnessione', () => { void healthSession.disconnect(); }, 'button secondary small'));
+    if (GOOGLE_HEALTH_PERSISTENT && state.status !== 'connected' && state.error?.code === 'UNAVAILABLE') controls.append(button('Riprova collegamento', () => { void healthSession.prepare(); }, 'button secondary small', { id: 'health-retry' }));
     if (!state.ready && state.error?.code === 'GIS_UNAVAILABLE') controls.append(button('Riprova caricamento accesso', () => { void healthSession.prepare(); }, 'button secondary small', { id: 'health-retry' }));
     else if (state.status === 'connected') {
       controls.append(button(state.busy ? 'Lettura in corso…' : 'Aggiorna', () => { void healthSession.refresh(); }, 'button primary small', { id: 'health-refresh', disabled: state.busy || future }),
         button('Cambia account', () => healthSession.connect(), 'button secondary small', { id: 'health-account', disabled: state.busy }),
-        button('Scollega questa sessione', () => healthSession.disconnect(), 'text-button', { id: 'health-disconnect' }));
+        button(GOOGLE_HEALTH_PERSISTENT ? 'Scollega questo dispositivo' : 'Scollega questa sessione', () => healthSession.disconnect(), 'text-button', { id: 'health-disconnect' }));
     } else controls.append(button(!state.ready ? 'Preparazione accesso…' : authenticating ? 'Accesso in corso…' : ['expired', 'account_not_linked'].includes(state.status) ? 'Ricollega Google Health' : 'Collega Google Health', () => healthSession.connect(), 'button primary small', { id: 'health-connect', disabled: !state.ready || authenticating || future }));
   }
   return h('section', { class: 'panel google-health-panel', 'aria-labelledby': 'google-health-title' },
     h('div', { class: 'health-heading' }, h('div', {}, h('p', { class: 'eyebrow' }, 'CALORIE BRUCIATE'), h('h2', { id: 'google-health-title', tabindex: '-1' }, 'Google Health'), h('p', { class: 'helper' }, 'Fonti aggregate · dati separati dal piano alimentare')), h('span', { class: 'health-status', role: 'status' }, status)),
     state.status === 'unconfigured' ? h('p', { class: 'health-explainer' }, 'Il collegamento è in configurazione. Nessun account Google Health è collegato e nessun dato salute viene letto.') :
-      h('p', { class: 'health-explainer' }, 'Il collegamento vale per questa sessione aperta e può richiedere una nuova autorizzazione dopo una scadenza o un ricaricamento. La lettura non invia il diario o il profilo. L’invio dei pasti è separato, facoltativo e richiede conferma.'),
+      h('p', { class: 'health-explainer' }, GOOGLE_HEALTH_PERSISTENT ? 'Il collegamento viene mantenuto anche quando chiudi il sito. Potrebbe essere necessario autorizzare di nuovo se Google revoca o fa scadere l’accesso. L’invio dei pasti resta facoltativo e richiede conferma.' : 'Il collegamento vale per questa sessione aperta e può richiedere una nuova autorizzazione dopo una scadenza o un ricaricamento. La lettura non invia il diario o il profilo. L’invio dei pasti è separato, facoltativo e richiede conferma.'),
     future && h('p', { class: 'notice compact' }, 'Le calorie di un giorno futuro non vengono richieste.'),
     state.error && h('p', { class: 'health-error', role: 'alert' }, state.error.message),
     state.stale && result && h('p', { class: 'notice compact' }, 'Sono mostrati i dati dell’ultima lettura riuscita. L’aggiornamento automatico è sospeso fino a un nuovo tentativo manuale.'),
@@ -267,7 +270,7 @@ function renderGoogleHealth() {
     state.status === 'connected' && renderNutritionControls(state),
     h('p', { class: 'helper health-footnote' }, h('a', { id: 'health-privacy', href: './privacy.html', target: '_blank', rel: 'noopener noreferrer' }, 'Come vengono usati i dati')),
     h('p', { class: 'helper health-footnote' }, 'Le calorie attive sono già comprese nel totale: non vengono sommate al TDEE e non modificano il deficit o i pasti. L’ora di lettura non indica l’ultima sincronizzazione del dispositivo.'),
-    state.status !== 'unconfigured' && h('p', { class: 'helper health-footnote' }, 'Per oggi, la lettura si aggiorna ogni 5 minuti con pagina visibile e sessione valida. Nessun aggiornamento a pagina chiusa. Scollegare la sessione cancella i dati in memoria; per revocare il consenso usa ', h('a', { id: 'health-permissions', href: 'https://myaccount.google.com/connections', target: '_blank', rel: 'noopener noreferrer' }, 'le connessioni del tuo account Google'), '.'));
+    state.status !== 'unconfigured' && h('p', { class: 'helper health-footnote' }, GOOGLE_HEALTH_PERSISTENT ? 'La lettura si aggiorna ogni 5 minuti con pagina visibile. Scollega questo dispositivo elimina il suo accesso conservato sul server. Per revocare anche il consenso Google usa ' : 'Per oggi, la lettura si aggiorna ogni 5 minuti con pagina visibile e sessione valida. Nessun aggiornamento a pagina chiusa. Scollegare la sessione cancella i dati in memoria; per revocare il consenso usa ', h('a', { id: 'health-permissions', href: 'https://myaccount.google.com/connections', target: '_blank', rel: 'noopener noreferrer' }, 'le connessioni del tuo account Google'), '.'));
 }
 
 function renderNutritionControls(state) {
@@ -1195,7 +1198,7 @@ function renderMethod() {
     h('section', { class: 'panel method-panel' }, h('h2', {}, 'Quando serve una valutazione personale'),
       h('p', {}, 'In gravidanza, allattamento, con patologie o disturbi alimentari il calcolo automatico si ferma. Anche un peso molto basso o elevato, o una stima energetica insolita, richiede attenzione e può generare avvisi. Questi controlli non valutano l’adeguatezza clinica del piano.'),
       h('p', {}, 'Il preallenamento è facoltativo: adattalo alla fame, alla digestione e alla tua routine. Gli orari proposti sono indicativi; non devi mangiare immediatamente prima di allenarti.')),
-    h('section', { class: 'panel method-panel' }, h('h2', {}, 'Dati e installazione'), h('p', {}, 'Profilo, diario e registrazioni delle attività restano in questo browser. Il collegamento a Google Health è facoltativo: le calorie lette e i token restano soltanto in memoria. Con un permesso aggiuntivo puoi inviare i soli pasti consumati che selezioni e confermi. Le ricevute tecniche degli invii restano sul dispositivo, separate dal diario e dai backup.'),
+    h('section', { class: 'panel method-panel' }, h('h2', {}, 'Dati e installazione'), h('p', {}, GOOGLE_HEALTH_PERSISTENT ? 'Profilo, diario e attività restano in questo browser. Il servizio su Cloudflare conserva credenziali Google cifrate per mantenere il collegamento; le calorie lette restano in memoria. L’invio dei pasti è separato e richiede conferma. Le ricevute degli invii restano sul dispositivo.' : 'Profilo, diario e registrazioni delle attività restano in questo browser. Il collegamento a Google Health è facoltativo: le calorie lette e i token restano soltanto in memoria. Con un permesso aggiuntivo puoi inviare i soli pasti consumati che selezioni e confermi. Le ricevute tecniche degli invii restano sul dispositivo, separate dal diario e dai backup.'),
       h('p', {}, 'I backup JSON contengono dati personali: conservali con attenzione. ', source('Come vengono usati i dati', './privacy.html')),
       h('p', {}, 'Puoi aggiungere Pasti alla schermata Home dal menu del browser. La pagina richiede una connessione per essere caricata.'), source('Documentazione del metodo', './docs/nutrition.md')));
 }
@@ -1214,4 +1217,5 @@ window.addEventListener('storage', event => {
 render();
 if (GOOGLE_HEALTH_CLIENT_ID) void healthSession.prepare();
 document.addEventListener?.('visibilitychange', () => healthSession.setContext({ dateKey: selectedDate, active: page === 'today' && Boolean(data.profile), visible: document.visibilityState !== 'hidden' }));
-window.addEventListener('pagehide', () => healthSession.disconnect());
+window.addEventListener('pagehide', () => healthSession.suspend());
+window.addEventListener('pageshow', event => { if (event.persisted && GOOGLE_HEALTH_CLIENT_ID) void healthSession.prepare(); });

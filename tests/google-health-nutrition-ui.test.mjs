@@ -217,9 +217,9 @@ async function bootApp(t, store, hash = 'today', health = {}) {
   // deployment client ID so tests never depend on the developer's live setup.
   const appURL = new URL('../app.js', import.meta.url);
   let source = await readFile(appURL, 'utf8');
-  const configImport = /^import \{ GOOGLE_HEALTH_CLIENT_ID \} from ['"]\.\/src\/google-health-config\.js[^'"]*['"];$/m;
+  const configImport = /^import \{ GOOGLE_HEALTH_CLIENT_ID, GOOGLE_HEALTH_PERSISTENT \} from ['"]\.\/src\/google-health-config\.js[^'"]*['"];$/m;
   assert.match(source, configImport);
-  source = source.replace(configImport, `const GOOGLE_HEALTH_CLIENT_ID = ${JSON.stringify(health.clientId ?? '')};`)
+  source = source.replace(configImport, `const GOOGLE_HEALTH_CLIENT_ID = ${JSON.stringify(health.clientId ?? '')}; const GOOGLE_HEALTH_PERSISTENT = false;`)
     .replace(/from (['"])(\.\/[^'"]+)\1/g, (_, quote, path) => `from ${quote}${new URL(path, appURL).href}${quote}`);
   await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}#integration-${appImport += 1}`);
   await new Promise(resolve => setImmediate(resolve));

@@ -6,6 +6,8 @@ export const GOOGLE_HEALTH_SCOPE = 'https://www.googleapis.com/auth/googlehealth
 export const GOOGLE_HEALTH_NUTRITION_SCOPE = 'https://www.googleapis.com/auth/googlehealth.nutrition.writeonly';
 const REFRESH_MS = 5 * 60 * 1000;
 const MESSAGES = {
+  OFFLINE_ACCESS_REQUIRED: 'Google non ha rilasciato il permesso per mantenere l’accesso. Ricollega l’account e conferma l’autorizzazione.',
+  DISCONNECT_FAILED: 'Impossibile confermare la disconnessione dal server. Riprova prima di lasciare questo dispositivo.',
   AUTH_REQUIRED: 'La sessione Google è scaduta. Ricollega il tuo account per continuare.',
   ACCESS_DENIED: 'Google non ha concesso il permesso necessario per leggere le calorie.',
   ACCOUNT_NOT_LINKED: 'Questo account non è collegato a Google Health. Accedi prima all’app Google Health con lo stesso account, poi ricollega.',
@@ -73,7 +75,7 @@ export function createGoogleHealthSession({
   clientId = '', readDay = getGoogleHealthDay, verifyAccount = verifyGoogleHealthAccount,
   loadOAuth = loadGoogleIdentityServices, now = () => new Date(),
   prepareMeal = prepareGoogleHealthConsumedMeal, syncMeal = syncGoogleHealthConsumedMeal,
-  receiptStore = createGoogleHealthReceiptStore(),
+  receiptStore = createGoogleHealthReceiptStore(), persistent = null,
   setTimer = (callback, delay) => setTimeout(callback, delay), clearTimer = timer => clearTimeout(timer),
   onChange = () => {},
 } = {}) {
@@ -82,6 +84,8 @@ export function createGoogleHealthSession({
   let expiresAt = 0;
   let oauth = null;
   let preparing = null;
+  let restoring = null;
+  let explicitlyDisconnected = false;
   let generation = 0;
   let readRevision = 0;
   let autoTimer = null;
@@ -125,7 +129,10 @@ export function createGoogleHealthSession({
   }
   function armExpiry() {
     stopExpiry();
-    if (token) expiryTimer = setTimer(expire, Math.max(0, expiresAt - now().getTime()));
+    if (token) expiryTimer = setTimer(persistent ? () => {
+      expiryTimer = null;
+      if (context.visible) void restorePersistent();
+    } : expire, Math.max(1000, expiresAt - now().getTime() - (persistent ? 60000 : 0)));
   }
   function armAuto() {
     stopAuto();
@@ -145,7 +152,71 @@ export function createGoogleHealthSession({
       setState({ status: safe.code === 'AUTH_REQUIRED' ? 'expired' : safe.code === 'ACCOUNT_NOT_LINKED' ? 'account_not_linked' : 'disconnected', busy: false, data: null, stale: false, error: safe });
     } else setState({ busy: false, stale: Boolean(state.data), error: safe });
   }
+  async function restorePersistent() {
+    if (disposed || !persistent || explicitlyDisconnected) return;
+    if (restoring) return restoring;
+    const connection = generation;
+    if (!validToken()) setState({ status: 'verifying', busy: true, error: null });
+    restoring = (async () => {
+      try {
+        const response = await persistent.restore();
+        if (disposed || connection !== generation) return;
+        if (!response) {
+          clearCredentials();
+          setState({ status: 'disconnected', ready: true, busy: false, data: null, stale: false, error: null });
+          return;
+        }
+        const scopes = typeof response.scope === 'string' ? [...new Set(response.scope.split(/\s+/).filter(Boolean))] : [];
+        const seconds = Number(response.expires_in);
+        if (!scopes.includes(GOOGLE_HEALTH_SCOPE) || scopes.some(scope => ![GOOGLE_HEALTH_SCOPE, GOOGLE_HEALTH_NUTRITION_SCOPE].includes(scope))
+          || typeof response.access_token !== 'string' || !response.access_token || /\s/.test(response.access_token)
+          || !['number', 'string'].includes(typeof response.expires_in) || !Number.isFinite(seconds) || seconds <= 0 || seconds > 86400
+          || typeof response.healthUserId !== 'string' || !/^[A-Za-z0-9-]{1,63}$/.test(response.healthUserId)) throw { code: 'INVALID_RESPONSE' };
+        const expiry = now().getTime() + seconds * 1000;
+        const key = scopes.includes(GOOGLE_HEALTH_NUTRITION_SCOPE) ? await googleHealthAccountKey(clientId, response.healthUserId) : '';
+        if (disposed || connection !== generation) return;
+        clearCredentials();
+        token = response.access_token; expiresAt = expiry; readIdentity = response.healthUserId; accountKey = key;
+        if (key) { nutritionToken = token; nutritionExpiresAt = expiry; }
+        autoPaused = false;
+        setState({ status: 'connected', ready: true, busy: false, error: null,
+          nutrition: { ...emptyNutrition(), status: key ? 'ready' : 'disabled' } });
+        armExpiry();
+        if (context.active && context.visible) await refresh(false);
+      } catch (error) {
+        if (disposed || connection !== generation) return;
+        if (validToken()) {
+          setState({ ready: true, busy: false, error: safeError(error) });
+          stopExpiry();
+          expiryTimer = setTimer(() => { expiryTimer = null; if (context.visible) void restorePersistent(); }, 30000);
+        } else {
+          clearCredentials();
+          setState({ status: 'expired', ready: true, busy: false, data: null, stale: false, error: safeError(error) });
+        }
+      }
+    })().finally(() => { restoring = null; });
+    return restoring;
+  }
+  async function startPersistent(nutrition = false) {
+    if (disposed || state.busy || !state.ready) return false;
+    explicitlyDisconnected = false;
+    const connection = generation;
+    setState({ busy: true, error: null });
+    try { await persistent.connect(nutrition); return true; }
+    catch (error) {
+      if (!disposed && connection === generation) setState({ busy: false, error: safeError(error) });
+      return false;
+    }
+  }
   async function prepare() {
+    if (persistent) {
+      if (disposed || !clientId) return;
+      explicitlyDisconnected = false;
+      await restorePersistent();
+      const code = persistent.consumeError?.();
+      if (code && !disposed) setState({ error: safeError({ code }) });
+      return;
+    }
     if (disposed || !clientId || oauth) return;
     if (preparing) return preparing;
     setState({ ready: false, error: null });
@@ -159,6 +230,7 @@ export function createGoogleHealthSession({
     return preparing;
   }
   function connect() {
+    if (persistent) return startPersistent();
     if (disposed || !clientId || !oauth || ['authorizing', 'verifying'].includes(state.status)) return false;
     clearCredentials(); autoPaused = false;
     const connection = generation;
@@ -203,6 +275,7 @@ export function createGoogleHealthSession({
   }
   async function refresh(manual = true) {
     stopAuto();
+    if (persistent && !validToken() && !disposed) { await restorePersistent(); return; }
     if (disposed || !token || state.status !== 'connected') return;
     if (!validToken()) { expire(); return; }
     if (!context.active || !context.visible || state.busy || !context.dateKey || context.dateKey > calendarDate(now())) return;
@@ -230,6 +303,10 @@ export function createGoogleHealthSession({
     } catch (error) { if (!disposed && connection === generation && request === readRevision) fail(error); }
   }
   function requestNutritionAccess() {
+    if (persistent) {
+      if (state.status !== 'connected' || !validToken() || !receiptStore.available || validNutritionToken()) return false;
+      return startPersistent(true);
+    }
     if (disposed || !oauth || state.status !== 'connected' || !validToken() || !readIdentity || state.nutrition.busy || validNutritionToken()) return false;
     if (!receiptStore.available) { setNutrition({ error: safeError({ code: 'LOCKS_UNAVAILABLE' }) }); return false; }
     const connection = generation;
@@ -336,15 +413,24 @@ export function createGoogleHealthSession({
     context = updated; readRevision += 1; stopAuto();
     if (dateChanged) autoPaused = false;
     setState({ dateKey: context.dateKey, busy: ['authorizing', 'verifying'].includes(state.status), ...(dateChanged || pageChanged ? { data: null, stale: false } : {}) });
+    if (persistent && !explicitlyDisconnected && context.visible && (!validToken() || expiresAt - now().getTime() <= 60000)) { void restorePersistent(); return; }
     if (token && !validToken()) { expire(); return; }
     if (validToken() && state.status === 'connected' && context.active && context.visible && !autoPaused) void refresh(false);
   }
   function disconnect() {
+    explicitlyDisconnected = true;
     clearCredentials(); autoPaused = false;
     setState({ status: clientId ? 'disconnected' : 'unconfigured', busy: false, data: null, error: null, stale: false });
+    if (persistent) return persistent.disconnect().catch(() => {
+      if (!disposed && explicitlyDisconnected) setState({ error: safeError({ code: 'DISCONNECT_FAILED' }) });
+    });
+  }
+  function suspend() {
+    clearCredentials();
+    setState({ status: clientId ? 'disconnected' : 'unconfigured', busy: false, data: null, stale: false, error: null });
   }
   return {
-    prepare, connect, refresh, setContext, disconnect, requestNutritionAccess, syncNutrition, nutritionMealState,
+    prepare, connect, suspend, refresh, setContext, disconnect, requestNutritionAccess, syncNutrition, nutritionMealState,
     hasNutritionReceipt: async ({ dateKey, mealId }) => receiptStore.hasForMeal(await googleHealthMealKey(dateKey, mealId)),
     hasAnyNutritionReceipts: () => receiptStore.hasAny(),
     getState: () => snapshot(state),

@@ -12,7 +12,7 @@ Per oggi, l’intervallo parte dalla mezzanotte in `Europe/Rome` e termina all�
 
 I risultati sono stime del servizio. Una metrica assente rimane non disponibile; uno zero presente è uno zero valido. Se Google restituisce soltanto una parte degli intervalli richiesti, la scheda segnala la copertura parziale. Nessuna lacuna viene riempita con il metabolismo calcolato da Pasti. Il risultato dipende dai dati effettivamente presenti su Google Health: il collegamento non garantisce che tutte le attività di Garmin, Hevy o Strava siano confluite nell’account.
 
-### Accesso durante la sessione
+### Accesso durante la sessione su GitHub Pages
 
 Pasti usa il token model di Google Identity Services, con il solo permesso `googlehealth.activity_and_fitness.readonly`. La finestra Google si apre da un’azione dell’utente. Dopo il consenso, Pasti verifica che esista un profilo Google Health prima di leggere le calorie. Un account non collegato richiede prima l’accesso all’app mobile Google Health con lo stesso account.
 
@@ -20,13 +20,17 @@ Il token e le letture restano nella memoria della pagina: non vengono salvati ne
 
 Disconnetti cancella dalla sessione token e risultati; per revocare il permesso Google bisogna rimuovere Pasti dalle [connessioni dell’account Google](https://myaccount.google.com/connections). Vedi anche [come vengono usati i dati](../privacy.html).
 
+### Accesso mantenuto tra le aperture
+
+La [versione Cloudflare](persistent-access.md) aggiunge un servizio per conservare credenziali cifrate e rinnovare il collegamento attraverso un cookie protetto. Il servizio è pubblicato su [Pasti con accesso mantenuto](https://pasti.gabri-rosso02.workers.dev/) con Workers Free e D1 Free; database, segreti e redirect sono configurati. Il primo consenso e il ripristino reale della sessione restano da verificare. La versione GitHub Pages mantiene il flusso descritto sopra.
+
 ### Configurazione dell’installazione
 
 L’identificativo pubblico del client OAuth viene letto da [google-health-config.js](../src/google-health-config.js). Se è vuoto, la scheda indica che la configurazione deve essere completata e non avvia l’accesso. Non inserire mai un client secret o un token in questo file.
 
 La configurazione Google richiede un progetto con Google Health API abilitata, un’app OAuth e un client Web con origine JavaScript autorizzata `https://gabrirosa.github.io`, senza il percorso `/pasti/`. Per le prove locali occorre autorizzare separatamente l’origine e la porta usate. Gli utenti di prova devono essere aggiunti alla configurazione Google. L’abilitazione comporta l’accettazione dei termini Google; il consenso alla lettura dei dati resta un passaggio distinto dell’utente.
 
-Il client Web è configurato per il sito pubblico e l’app Google è in modalità di prova personale. Google Health API è abilitata; il consenso dell’account si completa dal sito. I test usano risposte sintetiche e la presenza dei dati personali deve essere verificata con una lettura reale. Non è stato attivato un servizio che aggiorni i dati a pagina chiusa.
+Il client Web è configurato per entrambi gli indirizzi e l’app Google è in produzione dal 27 ottobre 2026, ma non ancora verificata da Google. Google Health API è abilitata; il consenso dell’account si completa dal sito. I test usano risposte sintetiche e la presenza dei dati personali deve essere verificata con una lettura reale. Non è stato attivato un servizio che aggiorni i dati a pagina chiusa.
 
 Fonti ufficiali: [calorie Google Health](https://developers.google.com/health/data-types/calories), [aggregazioni rollUp](https://developers.google.com/health/reference/rest/v4/users.dataTypes.dataPoints/rollUp), [identità del profilo](https://developers.google.com/health/reference/rest/v4/users/getIdentity), [accesso dal browser](https://developers.google.com/identity/oauth2/web/guides/use-token-model) e [configurazione Google](https://developers.google.com/health/setup). Verificate il 23 ottobre 2026.
 
