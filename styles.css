@@ -540,3 +540,20 @@ dialog::backdrop { background: #14251b77; backdrop-filter: blur(3px); }
 .personal-portions h4 { margin-top: 0; font-size: 1.05rem; overflow-wrap: anywhere; }
 .personal-portions .form-actions { flex-wrap: wrap; }
 @media (max-width: 540px) { .barcode-search { align-items: stretch; flex-direction: column; } .portion-editor { padding: 1rem; } }
+
+.meal-macro-chart { display: flex; align-items: center; flex-wrap: nowrap; gap: 22px; margin: 8px 0 2px; }
+.macro-pie { display: block; flex: 0 1 240px; width: 240px; max-width: 52%; height: auto; }
+.meal-macro-chart figcaption { flex: 0 1 250px; min-width: 0; }
+.meal-macro-chart .meal-calories { display: block; font-size: 1.2rem; font-weight: 650; margin-bottom: 12px; }
+.macro-pie-legend { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.macro-pie-legend li { display: grid; grid-template-columns: 12px 1fr auto; align-items: center; gap: 8px; font-size: .75rem; }
+.macro-pie-legend b { font-weight: 600; white-space: nowrap; }
+.macro-pie-swatch { width: 12px; height: 12px; border: 1px solid #78867b; border-radius: 3px; }
+.macro-pie-caption { display: block; font-size: .61rem; color: var(--ink-soft); margin-top: 12px; line-height: 1.5; }
+@media (max-width: 540px) {
+  .meal-macro-chart { flex-wrap: wrap; justify-content: center; gap: 4px; }
+  .macro-pie { flex-basis: 260px; width: 260px; max-width: 100%; }
+  .meal-macro-chart figcaption { flex: 1 1 100%; }
+  .meal-macro-chart .meal-calories { text-align: center; margin-bottom: 10px; }
+  .macro-pie-caption { text-align: center; }
+}

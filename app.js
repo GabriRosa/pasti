@@ -1,13 +1,14 @@
-import { renderPortions } from './src/portions-ui.js?v=20261027-barcode';
-import { ACTIVITY_LEVELS, calculateTargets, sumMacros } from './src/nutrition.js?v=20261027-barcode';
-import { FOODS, LIDL_FOOD_IDS, getFood, getIngredientFood } from './src/foods.js?v=20261027-barcode';
-import { createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } from './src/planner.js?v=20261027-barcode';
-import { trainingForDate, validateTrainingPlan, TRAINING_LOG_TYPES, validateTrainingLog, trainingLogLabel } from './src/training.js?v=20261027-barcode';
-import { parseActivityCsv, suggestActivityColumns, summarizeActivityCsv } from './src/activity-import.js?v=20261027-barcode';
-import { STORAGE_KEY, MAX_BACKUP_BYTES, createEmptyData, validateData, parseBackup, loadData, saveData, exportBackup, clearData } from './src/storage.js?v=20261027-barcode';
-import { GOOGLE_HEALTH_CLIENT_ID } from './src/google-health-config.js?v=20261027-barcode';
-import { createGoogleHealthSession } from './src/google-health-session.js?v=20261027-barcode';
-import { prepareGoogleHealthConsumedMeal } from './src/google-health-nutrition.js?v=20261027-barcode';
+import { MACRO_CHART_KEYS, macroGrams, macroChartSvg } from './src/macro-chart.js?v=20261027-meal-charts';
+import { renderPortions } from './src/portions-ui.js?v=20261027-meal-charts';
+import { ACTIVITY_LEVELS, calculateTargets, sumMacros } from './src/nutrition.js?v=20261027-meal-charts';
+import { FOODS, LIDL_FOOD_IDS, getFood, getIngredientFood } from './src/foods.js?v=20261027-meal-charts';
+import { createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } from './src/planner.js?v=20261027-meal-charts';
+import { trainingForDate, validateTrainingPlan, TRAINING_LOG_TYPES, validateTrainingLog, trainingLogLabel } from './src/training.js?v=20261027-meal-charts';
+import { parseActivityCsv, suggestActivityColumns, summarizeActivityCsv } from './src/activity-import.js?v=20261027-meal-charts';
+import { STORAGE_KEY, MAX_BACKUP_BYTES, createEmptyData, validateData, parseBackup, loadData, saveData, exportBackup, clearData } from './src/storage.js?v=20261027-meal-charts';
+import { GOOGLE_HEALTH_CLIENT_ID } from './src/google-health-config.js?v=20261027-meal-charts';
+import { createGoogleHealthSession } from './src/google-health-session.js?v=20261027-meal-charts';
+import { prepareGoogleHealthConsumedMeal } from './src/google-health-nutrition.js?v=20261027-meal-charts';
 
 const $ = selector => document.querySelector(selector);
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -526,7 +527,7 @@ function renderToday() {
         h('div', { class: 'macro-track' }, h('span', { style: `width:${Math.min(100, consumed[macro.key] / Math.max(1, day.targets[macro.key]) * 100)}%` })),
         h('p', { class: 'macro-caption' }, delta > 0 ? `${round(delta)} g oltre l’obiettivo` : `Pianificati ${round(planned[macro.key])} g`));
     })),
-    ...day.targets.warnings.map(warning => h('div', { class: 'notice compact' }, warning)),
+    ...day.targets.warnings.filter(warning => !warning.startsWith('Sono stime iniziali per adulti sani.')).map(warning => h('div', { class: 'notice compact' }, warning)),
     h('div', { class: 'section-heading' }, h('div', {}, h('h2', { id: 'daily-meals-title', tabindex: '-1', class: 'scroll-target' }, 'I pasti del giorno'), h('p', {}, 'Scegli le alternative. Adatta i grammi. Registra ciò che mangi.'), h('p', { class: 'weight-legend' }, 'Pesi a crudo/secco, salvo alimenti pronti. Latte in ml; frutta senza scarti; merluzzo senza ghiaccio; tonno sgocciolato; uova senza guscio. Olio di cottura incluso. Orari indicativi.')), selectedDate !== localDate() && button('Torna a oggi', () => { selectedDate = localDate(); render(); }, 'text-button')),
     h('div', { class: 'meal-list' }, ...day.meals.map((meal, index) => renderMeal(meal, day, index))),
     !training && day.profileSnapshot.mealPlan !== 'chocolate-2200' && h('div', { class: 'rest-note' }, h('span', { 'aria-hidden': 'true' }, '☀'), h('p', {}, 'Oggi il piano prevede colazione, pranzo e cena. Il preallenamento compare nei giorni di corsa o sala attrezzi.')),
@@ -535,6 +536,17 @@ function renderToday() {
 
 function ingredientText(ingredient) {
   return `${getIngredientFood(ingredient, data.foodOverrides).name} · ${formatDecimal(ingredient.grams)} ${getIngredientFood(ingredient).unit}`;
+}
+
+function renderMealMacroChart(macros) {
+  const description = MACRO_CHART_KEYS.map(item => `${item.name}: ${macroGrams(macros[item.key])} g`).join(', ');
+  return h('figure', { class: 'meal-macros meal-macro-chart' },
+    h('img', { class: 'macro-pie', src: `data:image/svg+xml,${encodeURIComponent(macroChartSvg(macros))}`, alt: `Ripartizione energetica dei macro. ${description}`, width: 300, height: 225 }),
+    h('figcaption', {}, h('strong', { class: 'meal-calories' }, `${round(macros.kcal)} kcal`),
+      h('ul', { class: 'macro-pie-legend' }, ...MACRO_CHART_KEYS.map(item => h('li', {},
+        h('span', { class: 'macro-pie-swatch', style: `background:${item.color}`, 'aria-hidden': 'true' }),
+        h('span', {}, item.name), h('b', {}, `${macroGrams(macros[item.key])} g`)))),
+      h('small', { class: 'macro-pie-caption' }, 'Spicchi in proporzione alle calorie dei macro. Valori in grammi.')));
 }
 
 function renderMeal(meal, day, index) {
@@ -550,8 +562,7 @@ function renderMeal(meal, day, index) {
     h('div', { class: 'meal-body' },
       h('div', { class: 'meal-title-row' }, h('div', {}, h('p', { class: 'eyebrow' }, slotName), h('h3', {}, displayMeal.title)), h('span', { class: `status-pill${eaten ? ' complete' : ''}` }, eaten ? 'Mangiato' : skipped ? 'Saltato' : 'Da mangiare')),
       h('ul', { class: 'ingredient-list' }, ...displayMeal.ingredients.map(ingredient => h('li', {}, ingredientText(ingredient)))),
-      h('div', { class: 'meal-macros' }, h('strong', {}, `${round(displayMeal.macros.kcal)} kcal`), h('span', {}, `P ${round(displayMeal.macros.protein)} g`), h('span', {}, `C ${round(displayMeal.macros.carbs)} g`), h('span', {}, `G ${round(displayMeal.macros.fat)} g`)),
-      displayMeal.note && h('p', { class: 'meal-note' }, displayMeal.note),
+      renderMealMacroChart(displayMeal.macros),
       h('div', { class: 'meal-actions' },
         !eaten && !skipped && button('Modifica porzioni e alternative', () => { try { editMeal(meal); } catch (error) { notify(error.message, true); } }, 'text-button'),
         meal.slot === 'preworkout' && !eaten && button(skipped ? 'Aggiungi al piano' : 'Salta spuntino', () => updateDay(target => { target.skipped = skipped ? target.skipped.filter(id => id !== meal.id) : [...target.skipped, meal.id]; }), 'text-button muted'),
