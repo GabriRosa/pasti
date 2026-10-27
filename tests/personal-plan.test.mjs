@@ -13,7 +13,8 @@ test('chosen targets remain distinct from TDEE and exact ingredient totals', () 
   assert.equal(targets.kcal,2200); assert.equal(targets.protein,144); assert.equal(targets.fat,80); assert.equal(targets.carbs,226);
   assert.notEqual(targets.tdee-targets.kcal,500);
   const total=sumMacros(meals.map(x=>x.macros));
-  close(total.kcal,2200.3); close(total.protein,144.075); close(total.fat,81.82); close(total.carbs,220.68);
+  close(total.kcal,2207.0425); close(total.protein,144.075); close(total.fat,82.56925); close(total.carbs,220.68);
+  for (const meal of meals.slice(2)) assert.equal(meal.ingredients.find(item => item.foodId === 'olive-oil').grams, 30.375); // 2.25 tablespoons
   assert.equal(meals[0].time,'06:00'); assert.equal(meals[1].time,'07:00'); assert.equal(meals[3].time,'19:30');
   assert.equal(meals[1].ingredients.find(x=>x.foodId==='skim-milk').grams,250);
   assert.equal(getFood('skim-milk').unit,'ml');

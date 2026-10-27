@@ -1,3 +1,4 @@
+import { quantitySpec, toDisplayAmount, toStoredAmount, formatFoodAmount } from './food-measures.js?v=20261027-oil';
 import { normalizeBarcode, lookupProduct, createBarcodeScanner, validatePersonalFood } from './barcode.js?v=20261027-neutral';
 
 export function renderPortions({ h, field, button, getPortions, save, remove, addToMeal, reportError }) {
@@ -38,7 +39,9 @@ export function renderPortions({ h, field, button, getPortions, save, remove, ad
     const name = h('input', { type: 'text', required: true, maxlength: 200, value: food.name });
     const brand = h('input', { type: 'text', maxlength: 200, value: food.brand });
     const unit = h('select', {}, h('option', { value: 'g', selected: food.unit === 'g' }, 'Per 100 g'), h('option', { value: 'ml', selected: food.unit === 'ml' }, 'Per 100 ml'));
-    const amount = h('input', { type: 'number', required: true, min: 0.1, max: 3000, step: '0.1', inputmode: 'decimal', value: portion?.grams ?? 100 });
+    const portionId = portion?.id ?? `personal-${crypto.randomUUID()}`;
+    let spec = quantitySpec(portionId, food);
+    const amount = h('input', { type: 'number', required: true, min: spec.min, max: spec.max, step: spec.step, inputmode: 'decimal', value: toDisplayAmount(portionId, food, portion?.grams ?? 100) });
     const quantityLabel = h('span', {}, `Quantità della porzione · ${food.unit}`);
     const inputs = {};
     const totals = h('p', { class: 'portion-totals', role: 'status', 'aria-live': 'polite' });
@@ -46,18 +49,30 @@ export function renderPortions({ h, field, button, getPortions, save, remove, ad
     const metrics = [['kcal', 'Energia · kcal', 1000], ['protein', 'Proteine · g', 100], ['carbs', 'Carboidrati · g', 100], ['fat', 'Grassi · g', 100]];
     const read = () => ({ name: name.value.trim(), brand: brand.value.trim(), barcode: food.barcode, unit: unit.value,
       ...Object.fromEntries(metrics.map(([key]) => [key, inputs[key].value === '' ? null : inputs[key].valueAsNumber])) });
+    const amountValid = () => amount.value !== '' && Number.isFinite(amount.valueAsNumber) && amount.valueAsNumber >= spec.min && amount.valueAsNumber <= spec.max
+      && (spec.factor === 1 || Math.abs(amount.valueAsNumber / spec.step - Math.round(amount.valueAsNumber / spec.step)) < 1e-7);
     const update = () => {
-      quantityLabel.textContent = `Quantità della porzione · ${unit.value}`;
       const values = read();
-      const valid = metrics.every(([key, , max]) => Number.isFinite(values[key]) && values[key] >= 0 && values[key] <= max) && amount.checkValidity() && amount.value !== '';
+      const nextSpec = quantitySpec(portionId, values);
+      if (spec.factor !== nextSpec.factor && Number.isFinite(amount.valueAsNumber) && amount.valueAsNumber >= 0 && (spec.factor === 1 || nextSpec.factor === 1)) {
+        amount.value = toDisplayAmount(portionId, values, amount.valueAsNumber * spec.factor);
+      }
+      spec = nextSpec;
+      for (const key of ['min', 'max', 'step']) amount.setAttribute(key, spec[key]);
+      amount.setAttribute('aria-label', `Quantità della porzione in ${spec.unit}`);
+      quantityLabel.textContent = `Quantità della porzione · ${spec.unit}`;
+      const valid = metrics.every(([key, , max]) => Number.isFinite(values[key]) && values[key] >= 0 && values[key] <= max) && amountValid();
+      const storedAmount = valid ? toStoredAmount(portionId, values, amount.valueAsNumber) : 0;
       const fmt = n => n.toLocaleString('it-IT', { maximumFractionDigits: 1 });
-      totals.textContent = valid ? `La tua porzione: ${fmt(values.kcal * amount.valueAsNumber / 100)} kcal · P ${fmt(values.protein * amount.valueAsNumber / 100)} g · C ${fmt(values.carbs * amount.valueAsNumber / 100)} g · G ${fmt(values.fat * amount.valueAsNumber / 100)} g` : 'Completa i valori mancanti e la quantità per calcolare la porzione.';
+      totals.textContent = valid ? `La tua porzione: ${fmt(values.kcal * storedAmount / 100)} kcal · P ${fmt(values.protein * storedAmount / 100)} g · C ${fmt(values.carbs * storedAmount / 100)} g · G ${fmt(values.fat * storedAmount / 100)} g`
+        : spec.factor !== 1 && !amountValid() ? 'Per l’olio usa multipli di 0,25 cucchiai.' : 'Completa i valori mancanti e la quantità per calcolare la porzione.';
     };
     const editForm = h('form', { class: 'portion-editor', oninput: update, onchange: update, onsubmit: event => {
       event.preventDefault(); if (!editForm.reportValidity()) return;
       try {
         const values = validatePersonalFood(read());
-        const saved = { id: portion?.id ?? `personal-${crypto.randomUUID()}`, food: values, grams: amount.valueAsNumber };
+        if (!amountValid()) throw new Error(spec.factor === 1 ? 'Inserisci una quantità tra 0,1 e 3.000.' : 'Per l’olio usa multipli di 0,25 cucchiai.');
+        const saved = { id: portionId, food: values, grams: toStoredAmount(portionId, values, amount.valueAsNumber) };
         save(saved); editor.replaceChildren(); renderList(); status.textContent = 'Porzione salvata. Ora puoi aggiungerla a un pasto.';
       } catch (error) { errorBox.textContent = error.message; }
     } }, h('h3', {}, portion ? 'Modifica la porzione personale' : 'La tua porzione'),
@@ -78,7 +93,7 @@ export function renderPortions({ h, field, button, getPortions, save, remove, ad
       portions.length ? h('div', { class: 'food-catalog' }, ...portions.map(portion => {
         const f = portion.food, ratio = portion.grams / 100, fmt = n => n.toLocaleString('it-IT', { maximumFractionDigits: 1 });
         return h('article', { class: 'food-card' }, h('h4', {}, f.name), h('p', { class: 'helper' }, f.brand),
-          h('p', { class: 'food-calories' }, `${fmt(portion.grams)} ${f.unit} · ${fmt(f.kcal * ratio)} kcal`),
+          h('p', { class: 'food-calories' }, `${formatFoodAmount(portion.id, f, portion.grams)} · ${fmt(f.kcal * ratio)} kcal`),
           h('p', {}, `P ${fmt(f.protein * ratio)} g · C ${fmt(f.carbs * ratio)} g · G ${fmt(f.fat * ratio)} g`),
           h('div', { class: 'form-actions' }, button('Aggiungi a un pasto', () => addToMeal(portion), 'button primary small'),
           button('Modifica', () => { scanner.stop(); camera.hidden = true; request?.abort(); searchVersion++; searchButton.disabled = false; openEditor(f, portion); editor.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 'text-button'),
@@ -90,7 +105,7 @@ export function renderPortions({ h, field, button, getPortions, save, remove, ad
   document.addEventListener('visibilitychange', visibility);
   window.addEventListener('pagehide', stopCamera);
   section.append(h('p', { class: 'eyebrow' }, 'DALLA CONFEZIONE AL DIARIO'), h('h2', {}, 'Scansiona e salva la tua porzione'),
-    h('p', {}, 'Inquadra il codice a barre, controlla i valori e scegli quanti grammi mangiare.'),
+    h('p', {}, 'Inquadra il codice a barre, controlla i valori e scegli la quantità da mangiare.'),
     h('div', { class: 'form-actions' }, button('Inquadra codice a barre', () => { request?.abort(); searchVersion++; searchButton.disabled = false; editor.replaceChildren(); camera.hidden = false; status.textContent = 'Avvio fotocamera…'; void scanner.start(); }, 'button primary'),
       button('Inserisci prodotto a mano', () => { request?.abort(); searchVersion++; searchButton.disabled = false; stopCamera(); status.textContent = ''; openEditor({ name: '', brand: '', barcode: '', unit: 'g', kcal: null, protein: null, carbs: null, fat: null }); }, 'text-button')),
     h('p', { class: 'helper' }, 'La fotocamera legge il codice sul dispositivo. Solo il codice viene inviato a Open Food Facts, senza foto né dati del diario.'), camera, form, status, editor, list,

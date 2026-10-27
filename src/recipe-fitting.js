@@ -1,5 +1,6 @@
 import { getIngredientFood, ingredientMacros } from './foods.js?v=20261027-neutral';
 import { sumMacros } from './nutrition.js?v=20261027-neutral';
+import { quantitySpec, quantizeFoodAmount } from './food-measures.js?v=20261027-neutral';
 
 export const MACRO_KEYS = Object.freeze(['protein', 'carbs', 'fat']);
 const SLOTS = Object.freeze(['preworkout', 'breakfast', 'lunch', 'dinner']);
@@ -128,7 +129,7 @@ export function fitRecipeIngredients(ingredients, target, overrides = {}, option
     // A sub-decigram base may have no representable adjustable amount; preserve it.
     if (max < min) { fixed = true; min = item.grams; max = item.grams; }
     return {
-      item, fixed, scale, minAmount: min, maxAmount: max, min: min / scale, max: max / scale, base: item.grams / scale,
+      item, food, fixed, scale, minAmount: min, maxAmount: max, min: min / scale, max: max / scale, base: item.grams / scale,
       column: MACRO_KEYS.map((key, i) => food[key] / 100 * scale / normalizedBy[i]),
     };
   });
@@ -167,11 +168,26 @@ export function fitRecipeIngredients(ingredients, target, overrides = {}, option
       if (largestChange < 1e-9) break;
     }
   }
-  const fitted = rows.map((row, index) => ({
-    ...row.item,
-    ...(row.item.foodSnapshot ? { foodSnapshot: { ...row.item.foodSnapshot } } : {}),
-    grams: row.fixed ? row.item.grams : clamp(roundAmount(amounts[index] * row.scale), row.minAmount, row.maxAmount),
-  }));
+  const fitted = rows.map((row, index) => {
+    const spec = quantitySpec(row.item.foodId, row.food);
+    const raw = amounts[index] * row.scale;
+    let grams = row.fixed ? row.item.grams : clamp(spec.factor === 1 ? roundAmount(raw) : raw, row.minAmount, row.maxAmount);
+    if (!locked.has(row.item.foodId) && spec.factor !== 1 && grams > 0) {
+      const quarter = spec.factor / 4;
+      const minimum = Math.max(1, Math.ceil(row.minAmount / quarter - 1e-9));
+      const maximum = Math.floor(row.maxAmount / quarter + 1e-9);
+      // Keep a quarter within practical bounds when one exists; otherwise use
+      // the closest positive kitchen measure, even for a tiny original amount.
+      grams = maximum >= minimum
+        ? clamp(Math.round(grams / quarter), minimum, maximum) * quarter
+        : quantizeFoodAmount(row.item.foodId, row.food, grams);
+    }
+    return {
+      ...row.item,
+      ...(row.item.foodSnapshot ? { foodSnapshot: { ...row.item.foodSnapshot } } : {}),
+      grams,
+    };
+  });
   const macros = sumMacros(fitted.map(item => ingredientMacros(item, overrides)));
   const targetKcal = target.kcal ?? target.protein * 4 + target.carbs * 4 + target.fat * 9;
   const deviation = { ...Object.fromEntries(MACRO_KEYS.map(key => [key, macros[key] - target[key]])), kcal: macros.kcal - targetKcal };

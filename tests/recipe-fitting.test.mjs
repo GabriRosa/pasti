@@ -4,7 +4,7 @@ import { DEFAULT_MEAL_DISTRIBUTION, MACRO_KEYS, validateMealDistribution, mealMa
 import { ingredientMacros } from '../src/foods.js';
 import { sumMacros } from '../src/nutrition.js';
 const clone = value => JSON.parse(JSON.stringify(value));
-const base = [{ foodId: 'chicken', grams: 130 }, { foodId: 'rice', grams: 80 }, { foodId: 'olive-oil', grams: 15 }];
+const base = [{ foodId: 'chicken', grams: 130 }, { foodId: 'rice', grams: 80 }, { foodId: 'olive-oil', grams: 13.5 }];
 const near = (actual, expected, tolerance = .05) => assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} differs from ${expected}`);
 
 test('each daily macro is fully and independently distributed; validation returns a detached copy', () => {
@@ -31,7 +31,7 @@ test('distribution rejects missing slots, extra fields, nonnumeric values and to
 });
 
 test('chicken, rice and oil meet feasible targets with all food contributions counted', () => {
-  const target = { protein: 50, carbs: 70, fat: 20 };
+  const target = sumMacros([{ foodId: 'chicken', grams: 190 }, { foodId: 'rice', grams: 90 }, { foodId: 'olive-oil', grams: 20.25 }].map(item => ingredientMacros(item)));
   const before = clone(base);
   const result = fitRecipeIngredients(base, target);
   assert.equal(result.matched, true);
@@ -39,7 +39,7 @@ test('chicken, rice and oil meet feasible targets with all food contributions co
   assert.deepEqual(result.macros, sumMacros(result.ingredients.map(item => ingredientMacros(item))));
   assert.deepEqual(base, before);
   assert.deepEqual(result.ingredients.map(item => item.foodId), base.map(item => item.foodId));
-  for (const item of result.ingredients) { assert.ok(item.grams > 0 && item.grams <= 3000); near(item.grams * 10, Math.round(item.grams * 10), 1e-7); }
+  for (const item of result.ingredients) { assert.ok(item.grams > 0 && item.grams <= 3000); if (item.foodId !== 'olive-oil') near(item.grams * 10, Math.round(item.grams * 10), 1e-7); }
 });
 
 test('an impossible single-food recipe reports deficits instead of claiming an exact fit', () => {
@@ -153,7 +153,7 @@ test('balanced fitting retains ingredient character with quarter-base minimum an
   const result = fitRecipeIngredients(ingredients, { protein: 2, carbs: 1, fat: 40 });
   assert.equal(result.ingredients[0].grams, 50);
   assert.equal(result.ingredients[1].grams, 25);
-  assert.equal(result.ingredients[2].grams, 20, 'small oil remains adjustable, but never exceeds four times the base');
+  assert.equal(result.ingredients[2].grams, 16.875, 'small oil uses the largest quarter-tablespoon below four times the base');
   assert.equal(result.matched, false);
 });
 
@@ -165,7 +165,7 @@ test('proportional mode uses a shared factor and preserves explicit locks', () =
   assert.equal(result.ingredients[0].grams, 130);
   assert.equal(result.ingredients[3].grams, 3);
   near(result.ingredients[1].grams, 120);
-  near(result.ingredients[2].grams, 22.5);
+  near(result.ingredients[2].grams, 20.25);
   assert.equal(result.matched, true);
   const capped = fitRecipeIngredients(base, { protein: 10000, carbs: 10000, fat: 10000 }, {}, { mode: 'proportional' });
   capped.ingredients.forEach((item, i) => near(item.grams, base[i].grams * 4));
@@ -198,4 +198,20 @@ test('proportional mode scales spices, yeast and water by the same recipe factor
   const cappedIngredients = [...base, personal('water', 2000, { kcal: 0 })];
   const capped = fitRecipeIngredients(cappedIngredients, { protein: 10000, carbs: 10000, fat: 10000 }, {}, { mode: 'proportional' });
   capped.ingredients.forEach((item, i) => near(item.grams, cappedIngredients[i].grams * 1.5));
+});
+
+
+test('oil quarter-tablespoon rounding recomputes actual macros, deviations and match status', () => {
+  const ingredients = [{ foodId: 'olive-oil', grams: 13.5 }];
+  const target = ingredientMacros({ foodId: 'olive-oil', grams: 15 });
+  const result = fitRecipeIngredients(ingredients, target);
+  assert.equal(result.ingredients[0].grams, 13.5);
+  assert.deepEqual(result.macros, ingredientMacros(result.ingredients[0]));
+  near(result.deviation.fat, result.macros.fat - target.fat);
+  assert.equal(result.matched, false, 'the continuous solution was exact, but the actual kitchen measure is not');
+  const locked = fitRecipeIngredients([{ foodId: 'olive-oil', grams: 15 }], target, {}, { lockedFoodIds: ['olive-oil'] });
+  assert.equal(locked.ingredients[0].grams, 15);
+  assert.equal(locked.matched, true);
+  const tiny = fitRecipeIngredients([{ foodId: 'olive-oil', grams: .5 }], { protein: 0, carbs: 0, fat: 2 });
+  assert.equal(tiny.ingredients[0].grams, 3.375, 'if the bounds contain no quarter, use the nearest positive quarter');
 });

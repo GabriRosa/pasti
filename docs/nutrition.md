@@ -48,10 +48,10 @@ Il campo opzionale `nutritionTargets: {kcal, protein, fat}` prevale sul calcolo 
 | --- | --- |
 | Prima dell’allenamento | Banana 120 g senza buccia |
 | Colazione | Latte scremato 250 ml, whey 30 g, FAGE Total 0% 150 g, avena 20 g, fondente 85% 30 g, mela 150 g edibili |
-| Pranzo | Pasta secca 90 g, pollo crudo 120 g, passata 150 g, zucchine crude 250 g, olio EVO 30 g |
-| Cena | Riso secco 65 g, filetti di merluzzo crudi senza glassatura 220 g, zucchine crude 250 g, olio EVO 30 g, mela 150 g edibili |
+| Pranzo | Pasta secca 90 g, pollo crudo 120 g, passata 150 g, zucchine crude 250 g, olio EVO 2,25 cucchiai (circa 30,375 g) |
+| Cena | Riso secco 65 g, filetti di merluzzo crudi senza glassatura 220 g, zucchine crude 250 g, olio EVO 2,25 cucchiai (circa 30,375 g), mela 150 g edibili |
 
-Con il catalogo iniziale, la somma è 2.200,3 kcal, 144,075 g di proteine, 81,82 g di grassi e 220,68 g di carboidrati. Il riferimento scelto resta 2.200 kcal, 144 g di proteine, 80 g di grassi e 226 g di carboidrati. Gli override delle etichette ricalcolano i totali; cambiare il riferimento non ridimensiona le porzioni fisse.
+Con il catalogo iniziale, la somma è 2.207,0425 kcal, 144,075 g di proteine, 82,56925 g di grassi e 220,68 g di carboidrati. Il riferimento scelto resta 2.200 kcal, 144 g di proteine, 80 g di grassi e 226 g di carboidrati. Gli override delle etichette ricalcolano i totali; cambiare il riferimento non ridimensiona le porzioni fisse.
 
 Le alternative Milbona conservano latte, uno shaker da 30 g, cioccolato e mela. Il planner adatta dessert e avena alle calorie e proteine della colazione base, arrotondando le dosi a 5 g; mostra gli scostamenti reali nei macro. Restano disponibili entrambi i gusti di budino e mousse. Per pranzo e cena le alternative comprendono pasta, riso, couscous, patate, le due paste di lenticchie Lidl, pollo, tacchino, merluzzo, uova, albumi, salmone, tonno e filetto di maiale. Il bilanciamento considera tutte le proteine del piatto.
 
@@ -207,7 +207,7 @@ Per allenamenti dalle 09:00 in poi l’app conserva la colazione alle 08:00 e ch
 
 La colazione parte da circa il 27% dell’energia. Pranzo riceve metà dei nutrienti rimasti; cena parte dal residuo effettivo dopo pranzo. Se un pasto non può raggiungere l’energia prevista, il generatore prova a distribuire il residuo nell’altro, mantenendo il vincolo proteico. Se resta una differenza calorica oltre il 5%, prova un altro carboidrato tra quelli disponibili. Questa scelta riguarda il piano iniziale; tutte le combinazioni restano selezionabili.
 
-Le dosi restano entro limiti pratici: 20–150 g per il cereale secco, 50–300 g per pasta fresca di lenticchie, 80–650 g per patate, 50–300 g per carne o tonno, 60–250 g per salmone, 80–300 g per albumi usati da soli. La proposta con uova usa 100 g senza guscio, circa due uova medie, e albumi solo quando servono. Pane fino a 150 g e olio fino a 30 g sono componenti del calcolo, non aggiunte successive. Le verdure iniziali sono 200 g per pasto principale.
+Le dosi restano entro limiti pratici: 20–150 g per il cereale secco, 50–300 g per pasta fresca di lenticchie, 80–650 g per patate, 50–300 g per carne o tonno, 60–250 g per salmone, 80–300 g per albumi usati da soli. La proposta con uova usa 100 g senza guscio, circa due uova medie, e albumi solo quando servono. Pane fino a 150 g e olio fino a 30 g prima dell’arrotondamento ai quarti di cucchiaio sono componenti del calcolo, non aggiunte successive. Le verdure iniziali sono 200 g per pasto principale.
 
 `mealAlternatives` offre tutte le 36 combinazioni tra sei carboidrati e sei scelte proteiche per ogni pasto principale. `swapMealFood` ricalcola carboidrato, secondo, pane e olio, conservando verdure ed eventuali altri ingredienti fissi. La quota proteica del pasto è un vincolo, comprendente ogni ingrediente. Il primo passaggio cerca di conservare anche i carboidrati usando la minore quantità di pane necessaria. Se l’energia resta fuori da un intervallo del 4%, adatta prima l’olio, quando basta; altrimenti risolve di nuovo il pasto conservando proteine ed energia e riducendo lo scostamento di carboidrati e grassi.
 
@@ -228,3 +228,10 @@ node --test tests/domain.test.mjs tests/activity-import.test.mjs
 ```
 
 Il dominio non verifica allergie, micronutrienti o adeguatezza clinica e non misura il dispendio individuale. Tutte le quantità restano editabili nel diario.
+
+
+### Misura dell’olio
+
+L’interfaccia usa cucchiai in multipli di 0,25 e conserva grammi o millilitri nei dati. Per l’olio in grammi, un cucchiaio equivale convenzionalmente a 13,5 g, secondo la [voce USDA dell’olio d’oliva](https://www.nal.usda.gov/sites/default/files/page-files/Total_Fat.pdf); per le etichette per volume viene usato un cucchiaio da 15 ml. I cucchiai domestici possono avere capacità diverse.
+
+I nuovi piani e i calcoli automatici arrotondano l’olio e poi sommano i nutrienti della quantità risultante. Gli scostamenti dagli obiettivi includono quindi anche questo arrotondamento. I pasti già salvati mantengono le dosi originali e, quando necessario, mostrano una misura approssimata preceduta da «circa».

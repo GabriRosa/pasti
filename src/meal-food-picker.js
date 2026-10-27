@@ -1,3 +1,4 @@
+import { quantitySpec, toDisplayAmount, toStoredAmount } from './food-measures.js?v=20261027-oil';
 import { validatePersonalFood, normalizeBarcode, lookupProduct, createBarcodeScanner } from './barcode.js?v=20261027-neutral';
 
 // The picker only edits the meal draft. Persistence belongs to Save meal.
@@ -57,22 +58,29 @@ export function createMealFoodPicker({ h, field, button, getFoods, add, getUsual
     ], () => selectFood(item), 'picker-result', { 'aria-label': `Scegli ${item.food.name}` })));
     status.textContent = matches.length ? `${matches.length} ${matches.length === 1 ? 'alimento' : 'alimenti'}${matches.length > shown.length ? ' · Affina la ricerca per vedere gli altri.' : ''}` : 'Nessun alimento trovato. Puoi inserirlo a mano qui sotto.';
   }
+  function validAmount(amount, spec) {
+    const value = amount.valueAsNumber;
+    return amount.value !== '' && Number.isFinite(value) && value >= spec.min && value <= spec.max
+      && (spec.factor === 1 || Math.abs(value / spec.step - Math.round(value / spec.step)) < 1e-7);
+  }
+  const amountHint = spec => spec.factor === 1 ? 'Inserisci una quantità tra 0,1 e 3.000.' : 'Per l’olio usa multipli di 0,25 cucchiai.';
   function selectFood(item) {
     stopPending();
-    const amount = h('input', { type: 'number', min: .1, max: 3000, step: .1, required: true, inputmode: 'decimal', value: getUsualQuantity(item.id, item.food, item.grams || 100), 'aria-label': `Quantità da aggiungere in ${item.food.unit}` });
+    const spec = quantitySpec(item.id, item.food);
+    const amount = h('input', { type: 'number', min: spec.min, max: spec.max, step: spec.step, required: true, inputmode: 'decimal', value: toDisplayAmount(item.id, item.food, getUsualQuantity(item.id, item.food, item.grams || 100)), 'aria-label': `Quantità da aggiungere in ${spec.unit}` });
     const remember = h('input', { type: 'checkbox', class: 'remember-quantity' });
     const preview = h('p', { class: 'portion-totals', role: 'status' });
     const error = h('p', { class: 'form-error', role: 'alert' });
-    const update = () => { preview.textContent = amount.value !== '' && amount.checkValidity() ? macros(item.food, amount.valueAsNumber) : 'Inserisci una quantità tra 0,1 e 3.000.'; };
+    const update = () => { preview.textContent = validAmount(amount, spec) ? macros(item.food, toStoredAmount(item.id, item.food, amount.valueAsNumber)) : amountHint(spec); };
     amount.addEventListener('input', update);
     editor.replaceChildren(h('form', { class: 'picker-amount-form', onsubmit: event => {
       event.preventDefault();
-      if (!amount.checkValidity() || amount.value === '') { error.textContent = 'Inserisci una quantità tra 0,1 e 3.000.'; amount.reportValidity(); return; }
+      if (!validAmount(amount, spec)) { error.textContent = amountHint(spec); amount.reportValidity(); return; }
       try {
-        add({ foodId: item.id, grams: amount.valueAsNumber, ...(item.personal ? { foodSnapshot: { ...item.food } } : {}) }, null, allowRemember && remember.checked);
+        add({ foodId: item.id, grams: toStoredAmount(item.id, item.food, amount.valueAsNumber), ...(item.personal ? { foodSnapshot: { ...item.food } } : {}) }, null, allowRemember && remember.checked);
         editor.replaceChildren(); status.textContent = `${item.food.name} aggiunto ${context === 'recipe' ? 'alla ricetta' : 'al pasto'}.`;
       } catch (e) { error.textContent = e.message; }
-    } }, h('h4', {}, item.food.name), field(`Quantità · ${item.food.unit}`, amount, item.food.unitNote), preview, allowRemember && h('label', { class: 'picker-remember' }, remember, 'Usa questa quantità come abituale'), error,
+    } }, h('h4', {}, item.food.name), field(`Quantità · ${spec.unit}`, amount, item.food.unitNote), preview, allowRemember && h('label', { class: 'picker-remember' }, remember, 'Usa questa quantità come abituale'), error,
     h('div', { class: 'form-actions' }, h('button', { type: 'submit', class: 'button primary' }, 'Aggiungi ingrediente'), button('Annulla aggiunta', () => editor.replaceChildren()))));
     update(); amount.focus();
   }
@@ -82,7 +90,9 @@ export function createMealFoodPicker({ h, field, button, getFoods, add, getUsual
     const name = h('input', { required: true, maxlength: 200, value: food.name || '', 'aria-label': 'Nome nuovo alimento' });
     const brand = h('input', { maxlength: 200, value: food.brand || '' });
     const unit = h('select', {}, h('option', { value: 'g', selected: food.unit !== 'ml' }, '100 g'), h('option', { value: 'ml', selected: food.unit === 'ml' }, '100 ml'));
-    const amount = h('input', { type: 'number', min: .1, max: 3000, step: .1, required: true, inputmode: 'decimal', value: getUsualQuantity(newId, { ...food, unit: food.unit || 'g' }, 100) });
+    const initialFood = { ...food, unit: food.unit || 'g' };
+    let spec = quantitySpec(newId, initialFood);
+    const amount = h('input', { type: 'number', min: spec.min, max: spec.max, step: spec.step, required: true, inputmode: 'decimal', value: toDisplayAmount(newId, initialFood, getUsualQuantity(newId, initialFood, 100)) });
     const quantityLabel = h('span', {}, 'Quantità da aggiungere · g');
     const inputs = {};
     const metrics = [['kcal', 'Calorie · kcal', 1000], ['protein', 'Proteine · g', 100], ['carbs', 'Carboidrati · g', 100], ['fat', 'Grassi · g', 100]];
@@ -91,13 +101,26 @@ export function createMealFoodPicker({ h, field, button, getFoods, add, getUsual
     const preview = h('p', { class: 'portion-totals', role: 'status' });
     const read = () => validatePersonalFood({ name: name.value.trim(), brand: brand.value.trim(), barcode: food.barcode || '', unit: unit.value,
       ...Object.fromEntries(metrics.map(([key]) => [key, inputs[key].value === '' ? null : inputs[key].valueAsNumber])) });
-    const update = () => { quantityLabel.textContent = `Quantità da aggiungere · ${unit.value}`; try { const food = read(); preview.textContent = amount.value !== '' && amount.checkValidity() ? macros(food, amount.valueAsNumber) : ''; } catch { preview.textContent = 'Completa i valori dell’etichetta per calcolare la porzione.'; } };
+    const update = () => {
+      const identity = { name: name.value, unit: unit.value, fat: inputs.fat.valueAsNumber };
+      const nextSpec = quantitySpec(newId, identity);
+      if (spec.factor !== nextSpec.factor && Number.isFinite(amount.valueAsNumber) && amount.valueAsNumber >= 0 && (spec.factor === 1 || nextSpec.factor === 1)) {
+        amount.value = toDisplayAmount(newId, identity, amount.valueAsNumber * spec.factor);
+      }
+      spec = nextSpec;
+      for (const key of ['min', 'max', 'step']) amount.setAttribute(key, spec[key]);
+      amount.setAttribute('aria-label', `Quantità da aggiungere in ${spec.unit}`);
+      quantityLabel.textContent = `Quantità da aggiungere · ${spec.unit}`;
+      try { const food = read(); preview.textContent = validAmount(amount, spec) ? macros(food, toStoredAmount(newId, food, amount.valueAsNumber)) : amountHint(spec); }
+      catch { preview.textContent = 'Completa i valori dell’etichetta per calcolare la porzione.'; }
+    };
     const form = h('form', { class: 'picker-manual-form', oninput: update, onchange: update, onsubmit: event => {
       event.preventDefault(); if (!form.reportValidity()) return;
       try {
         const food = read();
         const id = newId;
-        const ingredient = { foodId: id, grams: amount.valueAsNumber, foodSnapshot: food };
+        if (!validAmount(amount, spec)) throw new Error(amountHint(spec));
+        const ingredient = { foodId: id, grams: toStoredAmount(id, food, amount.valueAsNumber), foodSnapshot: food };
         add(ingredient, allowRemember && remember.checked ? { id, food, grams: ingredient.grams } : null, allowRemember && remember.checked);
         editor.replaceChildren(); status.textContent = `${food.name} aggiunto. Conferma con ${context === 'recipe' ? 'Salva ricetta' : 'Salva questo pasto'}.`;
       } catch (e) { error.textContent = e.message; }

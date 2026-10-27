@@ -2638,3 +2638,134 @@ test('an impossible recipe exposes macro differences and cancelling leaves the d
   assert.equal(dialog.open, false);
   assert.deepEqual(loadData(store).data, initial);
 });
+
+function oilDiary(amount = 16.875) {
+  const key = todayKey();
+  const data = generatedDiary(key);
+  const first = data.days[key].meals[0];
+  data.days[key].meals[0] = mealFromIngredients({ ...first,
+    ingredients: [{ foodId: 'olive-oil', grams: amount }, { foodId: 'rice', grams: 80 }] });
+  return data;
+}
+
+test('daily oil display keeps quarter decimals and opening history never changes stored grams', async t => {
+  const key = todayKey(), initial = oilDiary(17), store = new MemoryStorage(); saveData(initial, store);
+  const { document } = await bootApp(t, store);
+  const first = document.querySelector('.meal-card');
+  assert.match(first.textContent, /circa 1,25 cucchiai/);
+  assert.doesNotMatch(first.textContent, /1,3 cucchiai/);
+  assert.deepEqual(loadData(store).data, initial);
+  openComposer(document);
+  const input = document.querySelector('.edit-ingredients input');
+  assert.equal(input.valueAsNumber, 1.25);
+  assert.equal(Number(input.attributes.step), .25);
+  composerButton(document, 'Annulla').click();
+  assert.equal(loadData(store).data.days[key].meals[0].ingredients[0].grams, 17);
+});
+
+test('meal oil editing rejects nonquarters and saves 1.25 tablespoons as 16.875 grams', async t => {
+  const key = todayKey(), initial = oilDiary(13.5), store = new MemoryStorage(); saveData(initial, store);
+  const { document } = await bootApp(t, store);
+  openComposer(document);
+  fillComposer(document, '.edit-ingredients input', '1.3');
+  composerButton(document, 'Salva questo pasto').click();
+  assert.equal(document.querySelector('#app-dialog').open, true);
+  assert.deepEqual(loadData(store).data, initial);
+  fillComposer(document, '.edit-ingredients input', '1.25');
+  document.querySelector('.save-usual-quantity').click();
+  assert.match(document.querySelector('.usual-quantity-note').textContent, /1,25 cucchiai/);
+  composerButton(document, 'Salva questo pasto').click();
+  const saved = loadData(store).data;
+  assert.equal(saved.days[key].meals[0].ingredients[0].grams, 16.875);
+  assert.deepEqual(saved.usualQuantities['olive-oil'], { grams: 16.875, unit: 'g' });
+  assertMacrosClose(saved.days[key].meals[0].macros, sumMacros([foodMacros('olive-oil', 16.875), foodMacros('rice', 80)]));
+  assert.match(document.querySelector('.meal-card').textContent, /1,25 cucchiai/);
+  assert.doesNotMatch(document.querySelector('.meal-card').textContent, /circa 1,25|1,3 cucchiai/);
+});
+
+test('habitual oil quantities validate quarter steps and the picker reuses the exact stored amount', async t => {
+  const key = todayKey(), initial = oilDiary(), store = new MemoryStorage(); saveData(initial, store);
+  const { document, navigate } = await bootApp(t, store, 'foods');
+  let panel = document.querySelector('.usual-quantities-panel');
+  const choice = panel.querySelector('select'); choice.value = 'olive-oil'; choice.dispatch('change');
+  const input = panel.querySelector('input');
+  assert.equal(Number(input.attributes.step), .25);
+  input.value = '1.3'; input.dispatch('input'); panel.querySelector('form').dispatch('submit');
+  assert.equal(loadData(store).data.usualQuantities, undefined);
+  input.value = '1.25'; input.dispatch('input'); panel.querySelector('form').dispatch('submit');
+  assert.deepEqual(loadData(store).data.usualQuantities['olive-oil'], { grams: 16.875, unit: 'g' });
+  navigate('today'); openComposer(document);
+  fillComposer(document, '.meal-food-picker input[type="search"]', 'Olio extravergine');
+  document.querySelector('.picker-result').click();
+  const pickerAmount = document.querySelector('.picker-amount-form input');
+  assert.equal(pickerAmount.valueAsNumber, 1.25);
+  assert.equal(Number(pickerAmount.attributes.step), .25);
+  fillComposer(document, '.picker-amount-form input', '1.3');
+  document.querySelector('.picker-amount-form').dispatch('submit');
+  assert.equal(document.querySelectorAll('.edit-ingredient').length, 2);
+  fillComposer(document, '.picker-amount-form input', '1.5');
+  document.querySelector('.picker-remember input').checked = false;
+  document.querySelector('.picker-amount-form').dispatch('submit');
+  composerButton(document, 'Salva questo pasto').click();
+  const saved = loadData(store).data;
+  assert.equal(saved.days[key].meals[0].ingredients.at(-1).grams, 20.25);
+  assert.equal(saved.usualQuantities['olive-oil'].grams, 16.875);
+});
+
+test('recipe oil editor uses quarter tablespoons and saves grams without changing the diary', async t => {
+  const initial = oilDiary(), store = new MemoryStorage();
+  initial.personalRecipes = [{ id: 'recipe-oil-quarter-test', name: 'Olio misurato per test', slot: 'lunch',
+    ingredients: [{ foodId: 'olive-oil', grams: 17 }, { foodId: 'rice', grams: 80 }] }];
+  saveData(initial, store);
+  const { document } = await bootApp(t, store, 'foods');
+  const search = document.querySelector('.recipes-panel input[type="search"]');
+  search.value = 'Olio misurato per test'; search.dispatch('input');
+  assert.match(document.querySelector('.recipe-card').textContent, /circa 1,25 cucchiai/);
+  clickText(document.querySelector('.recipe-card'), 'Modifica ricetta');
+  const input = document.querySelector('.recipe-ingredients input');
+  assert.equal(Number(input.attributes.step), .25);
+  assert.equal(input.valueAsNumber, 1.25);
+  input.value = '1.3'; input.dispatch('input');
+  clickText(document.querySelector('.recipe-editor'), 'Salva ricetta');
+  assert.deepEqual(loadData(store).data, initial);
+  input.value = '1.25'; input.dispatch('input');
+  clickText(document.querySelector('.recipe-editor'), 'Salva ricetta');
+  const saved = loadData(store).data;
+  assert.equal(saved.personalRecipes[0].ingredients[0].grams, 16.875);
+  assert.deepEqual(saved.days, initial.days);
+});
+
+for (const [unit, factor] of [['g', 13.5], ['ml', 15]]) {
+  test(`personal ${unit} oil portions and picker keep their nutrition basis while using tablespoons`, async t => {
+    const key = todayKey(), initial = oilDiary(), store = new MemoryStorage();
+    const food = { name: `Olio di semi test ${unit}`, brand: '', barcode: '', unit, kcal: 900, protein: 0, carbs: 0, fat: 100 };
+    initial.personalPortions = [{ id: `personal-oil-${unit}`, food, grams: factor }];
+    saveData(initial, store);
+    const { document, navigate } = await bootApp(t, store, 'foods');
+    clickText(document.querySelector('.personal-portions'), 'Modifica');
+    const input = document.querySelectorAll('.portion-editor input[type="number"]').at(-1);
+    assert.equal(input.valueAsNumber, 1);
+    assert.equal(Number(input.attributes.step), .25);
+    input.value = '1.3'; input.dispatch('input');
+    document.querySelector('.portion-editor').dispatch('submit');
+    assert.deepEqual(loadData(store).data.personalPortions, initial.personalPortions);
+    input.value = '1.25'; input.dispatch('input');
+    document.querySelector('.portion-editor').dispatch('submit');
+    const portion = loadData(store).data.personalPortions[0];
+    assert.equal(portion.grams, factor * 1.25);
+    assert.deepEqual(portion.food, food);
+    assert.match(document.querySelector('.personal-portions').textContent, /1,25 cucchiai/);
+    navigate('today'); openComposer(document);
+    fillComposer(document, '.meal-food-picker input[type="search"]', food.name);
+    document.querySelector('.picker-result').click();
+    const picked = document.querySelector('.picker-amount-form input');
+    assert.equal(picked.valueAsNumber, 1.25);
+    assert.equal(Number(picked.attributes.step), .25);
+    document.querySelector('.picker-amount-form').dispatch('submit');
+    composerButton(document, 'Salva questo pasto').click();
+    const saved = loadData(store).data.days[key].meals[0];
+    assert.equal(saved.ingredients.at(-1).grams, factor * 1.25);
+    assert.deepEqual(saved.ingredients.at(-1).foodSnapshot, food);
+    assertMacrosClose(saved.macros, mealFromIngredients(saved).macros);
+  });
+}

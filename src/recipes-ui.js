@@ -1,5 +1,6 @@
-import { createMealFoodPicker } from './meal-food-picker.js?v=20261027-recipes';
-import { mealFromIngredients } from './planner.js?v=20261027-neutral';
+import { quantitySpec, toStoredAmount, formatFoodAmount, quantizeFoodAmount } from './food-measures.js?v=20261027-oil';
+import { createMealFoodPicker } from './meal-food-picker.js?v=20261027-oil';
+import { mealFromIngredients } from './planner.js?v=20261027-oil';
 
 const SLOTS = [
   ['preworkout', 'Prima dell’allenamento'], ['breakfast', 'Colazione'],
@@ -40,7 +41,7 @@ export function renderRecipeLibrary({ h, field, button, getRecipes, getFoods, ge
   }
   function ingredientLine(item) {
     const food = getFoodForIngredient(item);
-    return `${food.name} · ${fmt(item.grams)} ${food.unit}`;
+    return `${food.name} · ${formatFoodAmount(item.foodId, food, item.grams)}`;
   }
   function renderList() {
     if (disposed) return;
@@ -73,24 +74,36 @@ export function renderRecipeLibrary({ h, field, button, getRecipes, getFoods, ge
     if (disposed) return;
     closeEditor();
     const draft = original ? copy(original) : { id: `recipe-user-${crypto.randomUUID()}`, name: '', slot: 'lunch', ingredients: [] };
+    for (const item of draft.ingredients) {
+      try { item.grams = quantizeFoodAmount(item.foodId, getFoodForIngredient(item), item.grams); } catch { /* Invalid labels remain editable below. */ }
+    }
     const name = h('input', { type: 'text', required: true, maxlength: 200, value: draft.name, 'aria-label': 'Nome della ricetta' });
     const slot = h('select', { 'aria-label': 'Pasto abituale della ricetta' }, ...SLOTS.map(([id, label]) => h('option', { value: id, selected: id === draft.slot }, label)));
     const rows = h('div', { class: 'edit-ingredients recipe-ingredients' });
     const totals = h('p', { class: 'portion-totals', role: 'status' });
     const errors = h('p', { class: 'form-error', role: 'alert' });
     function refreshTotals() {
-      try { totals.textContent = `Quantità base: ${macroText(asMeal(draft).macros)}`; errors.textContent = ''; }
+      try {
+        for (const item of draft.ingredients) {
+          const spec = quantitySpec(item.foodId, getFoodForIngredient(item));
+          const display = item.grams / spec.factor;
+          if (spec.factor !== 1 && (display < spec.min || display > spec.max || Math.abs(display / spec.step - Math.round(display / spec.step)) > 1e-7)) throw new Error('Per l’olio usa multipli di 0,25 cucchiai.');
+        }
+        totals.textContent = `Quantità base: ${macroText(asMeal(draft).macros)}`; errors.textContent = '';
+      }
       catch (error) { totals.textContent = ''; errors.textContent = error.message; }
     }
     function renderIngredients() {
       rows.replaceChildren(...draft.ingredients.map((item, index) => {
         let food;
         try { food = getFoodForIngredient(item); } catch { food = { name: item.foodId, unit: 'g' }; }
-        const input = h('input', { type: 'number', min: .1, max: 3000, step: .1, required: true, inputmode: 'decimal', value: item.grams, 'aria-label': `Quantità base di ${food.name}`, oninput: event => {
-          item.grams = event.target.valueAsNumber; refreshTotals();
+        const spec = quantitySpec(item.foodId, food);
+        const input = h('input', { type: 'number', min: spec.min, max: spec.max, step: spec.step, required: true, inputmode: 'decimal', value: item.grams / spec.factor, 'aria-label': `Quantità base di ${food.name}`, oninput: event => {
+          const value = event.target.valueAsNumber;
+          item.grams = Number.isFinite(value) && value >= 0 ? toStoredAmount(item.foodId, food, value) : NaN; refreshTotals();
         } });
         return h('div', { class: 'edit-ingredient' }, h('div', {}, h('strong', {}, food.name), food.unitNote && h('small', {}, food.unitNote)),
-          h('div', { class: 'gram-control' }, input, h('span', {}, food.unit)),
+          h('div', { class: 'gram-control' }, input, h('span', {}, spec.unit)),
           button('Rimuovi', () => { draft.ingredients.splice(index, 1); renderIngredients(); }, 'text-button', { 'aria-label': `Rimuovi dalla ricetta: ${food.name}` }));
       }));
       if (!draft.ingredients.length) rows.append(h('p', { class: 'helper' }, 'Aggiungi il primo ingrediente dal catalogo o tramite codice a barre.'));
@@ -111,6 +124,11 @@ export function renderRecipeLibrary({ h, field, button, getRecipes, getFoods, ge
         if (!SLOTS.some(([id]) => id === slot.value)) throw new Error('Scegli il pasto abituale della ricetta.');
         if (!draft.ingredients.length || draft.ingredients.length > 30) throw new Error('La ricetta deve contenere da 1 a 30 ingredienti.');
         if (draft.ingredients.some(item => !Number.isFinite(item.grams) || item.grams < .1 || item.grams > 3000)) throw new Error('Inserisci quantità base comprese tra 0,1 e 3.000 g o ml.');
+        for (const item of draft.ingredients) {
+          const spec = quantitySpec(item.foodId, getFoodForIngredient(item));
+          const display = item.grams / spec.factor;
+          if (spec.factor !== 1 && (display < spec.min || display > spec.max || Math.abs(display / spec.step - Math.round(display / spec.step)) > 1e-7)) throw new Error('Per l’olio usa multipli di 0,25 cucchiai.');
+        }
         draft.name = name.value.trim(); draft.slot = slot.value;
         const checked = asMeal(draft);
         const recipe = { id: draft.id, name: draft.name, slot: draft.slot, ingredients: checked.ingredients, ...(typeof draft.source === 'string' ? { source: draft.source } : {}) };

@@ -1,13 +1,14 @@
+import { quantitySpec, toDisplayAmount, toStoredAmount, formatFoodAmount, normalizeOilIngredients, quantizeFoodAmount } from './src/food-measures.js?v=20261027-oil';
 import { BASE_RECIPES, BASE_RECIPE_FOODS } from './src/base-recipes.js?v=20261027-recipes';
-import { renderRecipeLibrary } from './src/recipes-ui.js?v=20261027-recipes';
-import { DEFAULT_MEAL_DISTRIBUTION, validateMealDistribution, remainingMealTargets, fitRecipeIngredients } from './src/recipe-fitting.js?v=20261027-recipes';
+import { renderRecipeLibrary } from './src/recipes-ui.js?v=20261027-oil';
+import { DEFAULT_MEAL_DISTRIBUTION, validateMealDistribution, remainingMealTargets, fitRecipeIngredients } from './src/recipe-fitting.js?v=20261027-oil';
 import { foodQuantityKey, usualFoodQuantity } from './src/food-quantities.js?v=20261027-barcode-quantities';
-import { createMealFoodPicker } from './src/meal-food-picker.js?v=20261027-recipes';
+import { createMealFoodPicker } from './src/meal-food-picker.js?v=20261027-oil';
 import { MACRO_CHART_KEYS, macroGrams, macroChartSvg } from './src/macro-chart.js?v=20261027-neutral';
-import { renderPortions } from './src/portions-ui.js?v=20261027-neutral';
+import { renderPortions } from './src/portions-ui.js?v=20261027-oil';
 import { ACTIVITY_LEVELS, calculateTargets, sumMacros } from './src/nutrition.js?v=20261027-neutral';
 import { FOODS, LIDL_FOOD_IDS, getFood, getIngredientFood, ingredientMacros } from './src/foods.js?v=20261027-neutral';
-import { createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } from './src/planner.js?v=20261027-meal-times';
+import { createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } from './src/planner.js?v=20261027-oil';
 import { trainingForDate, validateTrainingPlan, TRAINING_LOG_TYPES, validateTrainingLog, trainingLogLabel } from './src/training.js?v=20261027-neutral';
 import { parseActivityCsv, suggestActivityColumns, summarizeActivityCsv } from './src/activity-import.js?v=20261027-neutral';
 import { STORAGE_KEY, MAX_BACKUP_BYTES, createEmptyData, validateData, validateRecipe, parseBackup, loadData, saveData, exportBackup, clearData } from './src/storage.js?v=20261027-recipes';
@@ -557,14 +558,15 @@ function renderToday() {
         h('p', { class: 'macro-caption' }, delta > 0 ? `${round(delta)} g oltre l’obiettivo` : `Pianificati ${round(planned[macro.key])} g`));
     })),
     ...day.targets.warnings.filter(warning => !warning.startsWith('Sono stime iniziali per adulti sani.')).map(warning => h('div', { class: 'notice compact' }, warning)),
-    h('div', { class: 'section-heading' }, h('div', {}, h('h2', { id: 'daily-meals-title', tabindex: '-1', class: 'scroll-target' }, 'I pasti del giorno'), h('p', {}, 'Scegli le alternative. Adatta i grammi. Registra ciò che mangi.'), h('p', { class: 'weight-legend' }, 'Pesi a crudo/secco, salvo alimenti pronti. Latte in ml; frutta senza scarti; merluzzo senza ghiaccio; tonno sgocciolato; uova senza guscio. Olio di cottura incluso. Orari indicativi.')), selectedDate !== localDate() && button('Torna a oggi', () => { selectedDate = localDate(); render(); }, 'text-button')),
+    h('div', { class: 'section-heading' }, h('div', {}, h('h2', { id: 'daily-meals-title', tabindex: '-1', class: 'scroll-target' }, 'I pasti del giorno'), h('p', {}, 'Scegli le alternative. Adatta i grammi. Registra ciò che mangi.'), h('p', { class: 'weight-legend' }, 'Pesi a crudo/secco, salvo alimenti pronti. Latte in ml; frutta senza scarti; merluzzo senza ghiaccio; tonno sgocciolato; uova senza guscio. Olio in cucchiai da circa 13,5 g, a passi di 0,25; olio di cottura incluso. Orari indicativi.')), selectedDate !== localDate() && button('Torna a oggi', () => { selectedDate = localDate(); render(); }, 'text-button')),
     h('div', { class: 'meal-list' }, ...day.meals.map((meal, index) => renderMeal(meal, day, index))),
     !training && day.profileSnapshot.mealPlan !== 'chocolate-2200' && h('div', { class: 'rest-note' }, h('span', { 'aria-hidden': 'true' }, '☀'), h('p', {}, 'Oggi il piano prevede colazione, pranzo e cena. Il preallenamento compare nei giorni di corsa o sala attrezzi.')),
     h('p', { class: 'page-footnote' }, 'Le quantità sono una base da adattare. I valori sono stime e non una prescrizione nutrizionale. ', h('a', { href: '#method' }, 'Leggi il metodo')));
 }
 
 function ingredientText(ingredient) {
-  return `${getIngredientFood(ingredient, data.foodOverrides).name} · ${formatDecimal(ingredient.grams)} ${getIngredientFood(ingredient).unit}`;
+  const food = getIngredientFood(ingredient, data.foodOverrides);
+  return `${food.name} · ${formatFoodAmount(ingredient.foodId, food, ingredient.grams)}`;
 }
 
 function renderMealMacroChart(macros) {
@@ -622,7 +624,7 @@ function dialogHeading(title, subtitle) {
 }
 
 function editMeal(original) {
-  let draft = clone(original);
+  let draft = { ...clone(original), ingredients: normalizeOilIngredients(original.ingredients, data.foodOverrides) };
   const pendingPortions = [];
   const pendingQuantities = {};
   let fitted = false;
@@ -647,12 +649,13 @@ function editMeal(original) {
     const previous = quantities(before);
     const current = quantities(draft);
     const ids = [...new Set([...previous.keys(), ...current.keys()])];
+    const quantityText = (id, amount) => formatFoodAmount(id, getIngredientFood(draft.ingredients.find(item => item.foodId === id) || before.ingredients.find(item => item.foodId === id)), amount);
     const changes = ids.filter(id => formatDecimal(previous.get(id) || 0) !== formatDecimal(current.get(id) || 0));
     adaptation.hidden = changes.length === 0;
     adaptation.replaceChildren(...(changes.length ? [
       h('strong', {}, 'Porzioni adattate automaticamente'),
       h('ul', {}, ...changes.map(id => h('li', {}, h('span', {}, getIngredientFood(draft.ingredients.find(item => item.foodId === id) || before.ingredients.find(item => item.foodId === id)).name), h('span', { class: 'portion-change' },
-        !previous.has(id) ? `Aggiunto: ${formatDecimal(current.get(id))} g` : !current.has(id) ? `${formatDecimal(previous.get(id))} g → rimosso` : `${formatDecimal(previous.get(id))} → ${formatDecimal(current.get(id))} g`)))),
+        !previous.has(id) ? `Aggiunto: ${quantityText(id, current.get(id))}` : !current.has(id) ? `${quantityText(id, previous.get(id))} → rimosso` : `${quantityText(id, previous.get(id))} → ${quantityText(id, current.get(id))}`)))),
     ] : []));
   };
   const updateTotals = () => {
@@ -679,22 +682,26 @@ function editMeal(original) {
     }
     ingredientFields.replaceChildren(...draft.ingredients.map((ingredient, index) => {
       const food = getIngredientFood(ingredient, data.foodOverrides);
-      const grams = h('input', { id: `ingredient-${index}`, type: 'number', min: '0', max: '3000', step: '0.1', inputmode: 'decimal', value: Number.isFinite(ingredient.grams) ? Number(ingredient.grams.toFixed(1)) : '', 'aria-label': `${food.name}, ${food.unit === 'ml' ? 'millilitri' : 'grammi'}`, oninput: event => {
+      const measure = quantitySpec(ingredient.foodId, food);
+      const grams = h('input', { id: `ingredient-${index}`, type: 'number', min: '0', max: measure.max, step: measure.step, inputmode: 'decimal', value: Number.isFinite(ingredient.grams) ? (measure.unit === 'cucchiai' ? toDisplayAmount(ingredient.foodId, food, ingredient.grams) : Number(ingredient.grams.toFixed(1))) : '', 'aria-label': `${food.name}, ${measure.unit === 'cucchiai' ? 'cucchiai' : food.unit === 'ml' ? 'millilitri' : 'grammi'}`, oninput: event => {
         fitStatus.replaceChildren();
         adaptation.hidden = true;
         adaptation.replaceChildren();
-        const value = event.target.valueAsNumber;
+        const displayed = event.target.valueAsNumber;
+        const validStep = measure.unit !== 'cucchiai' || Math.abs(displayed * 4 - Math.round(displayed * 4)) < 1e-8;
+        const value = validStep && Number.isFinite(displayed) && displayed >= 0 ? toStoredAmount(ingredient.foodId, food, displayed) : NaN;
         draft.ingredients[index].grams = value;
-        if (!Number.isFinite(value) || value < 0 || value > 3000) { values.replaceChildren(); errors.textContent = `Inserisci una quantità tra 0 e 3.000 ${food.unit}.`; return; }
+        if (!Number.isFinite(value) || value < 0 || value > 3000) { values.replaceChildren(); errors.textContent = measure.unit === 'cucchiai' ? 'Usa multipli di 0,25 cucchiai, oppure 0.' : `Inserisci una quantità tra 0 e 3.000 ${food.unit}.`; return; }
         updateTotals();
       } });
       const habitual = usualFoodQuantity(ingredient.foodId, food, quantities(), null);
-      const quantityNote = h('small', { class: 'usual-quantity-note' }, habitual === null ? '' : `Abituale: ${formatDecimal(habitual)} ${food.unit}`);
-      return h('div', { class: 'edit-ingredient' }, h('div', {}, h('label', { for: `ingredient-${index}` }, food.name), h('small', {}, food.unitNote), quantityNote),
-        h('div', { class: 'ingredient-quantity-actions' }, h('div', { class: 'gram-control' }, grams, h('span', {}, food.unit)),
+      const quantityNote = h('small', { class: 'usual-quantity-note' }, habitual === null ? '' : `Abituale: ${formatFoodAmount(ingredient.foodId, food, habitual)}`);
+      return h('div', { class: 'edit-ingredient' }, h('div', {}, h('label', { for: `ingredient-${index}` }, food.name), h('small', {}, measure.unit === 'cucchiai' ? `1 cucchiaio ≈ ${food.unit === 'ml' ? '15 ml' : '13,5 g'}. Quantità in multipli di 0,25.` : food.unitNote), quantityNote),
+        h('div', { class: 'ingredient-quantity-actions' }, h('div', { class: 'gram-control' }, grams, h('span', {}, measure.unit)),
           button('Usa come abituale', () => { try {
-            rememberQuantity(ingredient.foodId, food, grams.valueAsNumber);
-            quantityNote.textContent = `Abituale: ${formatDecimal(grams.valueAsNumber)} ${food.unit} · conferma salvando il pasto`;
+            if (!Number.isFinite(draft.ingredients[index].grams)) throw new Error('Controlla la quantità prima di salvarla.');
+            rememberQuantity(ingredient.foodId, food, draft.ingredients[index].grams);
+            quantityNote.textContent = `Abituale: ${formatFoodAmount(ingredient.foodId, food, draft.ingredients[index].grams)} · conferma salvando il pasto`;
           } catch (error) { errors.textContent = error.message; } }, 'text-button save-usual-quantity', { 'aria-label': `Usa come abituale per ${food.name}` })),
         button('Rimuovi', () => { draft.ingredients.splice(index, 1); adaptation.hidden = true; rebuild(); }, 'text-button remove-ingredient', { 'aria-label': `Rimuovi ${food.name}` }));
     }));
@@ -730,7 +737,7 @@ function editMeal(original) {
     fitStatus.replaceChildren();
     const index = Number(event.target.value);
     const choice = index === -1 ? original : alternatives[index];
-    if (choice) { const before = clone(draft); draft = clone(choice); draft.id = original.id; draft.slot = original.slot; draft.time = original.time; rebuild(); showAdaptation(before); }
+    if (choice) { const before = clone(draft); draft = { ...clone(choice), ingredients: normalizeOilIngredients(choice.ingredients, data.foodOverrides) }; draft.id = original.id; draft.slot = original.slot; draft.time = original.time; rebuild(); showAdaptation(before); }
   } }, h('option', { value: '' }, 'Scegli un’alternativa…'), h('option', { value: '-1' }, 'Pasto originale'), ...alternatives.map((meal, index) => h('option', { value: index }, meal.title)), h('optgroup', { label: 'Le tue ricette · quantità automatiche' }, ...recipes.map(recipe => h('option', { value: `recipe:${recipe.id}` }, recipe.name))));
   container.append(dialogHeading('Componi il tuo pasto', 'Aggiungi alimenti, scegli le quantità e controlla i macro.'), field('Alternative del pasto', variantSelect, original.slot === 'breakfast' ? 'Tra le colazioni: budino proteico, mousse proteica e yogurt greco con cioccolato.' : null), controls,
     ['lunch', 'dinner'].includes(original.slot) ? h('p', { class: 'swap-explanation' }, 'Cambiando alimento si adattano anche la porzione di carne, pesce o uova e l’olio. Le proteine di pasta e legumi sono già conteggiate.') : document.createDocumentFragment(),
@@ -824,7 +831,7 @@ function renderProfileForm() {
   const mealPlanSelect = h('select', { name: 'mealPlan' },
     h('option', { value: 'rotating', selected: profile?.mealPlan !== 'chocolate-2200' }, 'Proposte variate e porzioni automatiche'),
     h('option', { value: 'chocolate-2200', selected: profile?.mealPlan === 'chocolate-2200' }, 'Piano 2.200 kcal · shaker, latte scremato e cioccolato'));
-  const planNote = h('p', { class: 'helper' }, 'Il piano da 2.200 kcal usa porzioni fisse: circa 144 g di proteine, 82 g di grassi e 221 g di carboidrati. Il riferimento scelto è 144 g di proteine, 80 g di grassi e 226 g di carboidrati. Le alternative ricalcolano i valori. Cambiare il riferimento non ridimensiona queste porzioni.');
+  const planNote = h('p', { class: 'helper' }, 'Il piano da 2.200 kcal usa porzioni fisse: circa 144 g di proteine, 83 g di grassi e 221 g di carboidrati. Il riferimento scelto è 144 g di proteine, 80 g di grassi e 226 g di carboidrati. Le alternative ricalcolano i valori. Cambiare il riferimento non ridimensiona queste porzioni.');
   const legacyNote = legacyDeficit !== undefined ? h('p', { class: 'notice compact' }, `Prima usavi il deficit automatico del 10%. La proposta convertita è ${round(legacyDeficit)} kcal: puoi modificarla e confermarla salvando il profilo.`) : null;
   const modeSelect = h('select', { name: 'trainingMode', required: true },
     h('option', { value: 'alternating', selected: initialPlan.mode === 'alternating' }, 'Alternanza quotidiana: corsa / sala attrezzi'),
@@ -1159,7 +1166,7 @@ function fitComparison(result) {
 function ingredientList(ingredients) {
   return h('ul', { class: 'recipe-ingredient-preview' }, ...ingredients.map(item => {
     const food = getIngredientFood(item, data.foodOverrides);
-    return h('li', {}, `${food.name} · ${formatDecimal(item.grams)} ${food.unit}`);
+    return h('li', {}, `${food.name} · ${formatFoodAmount(item.foodId, food, item.grams)}`);
   }));
 }
 function renderDistributionPanel() {
@@ -1261,15 +1268,19 @@ function renderUsualQuantities() {
   const amount = h('input', { type: 'number', min: 0.1, max: 3000, step: 0.1, required: true, inputmode: 'decimal', 'aria-label': 'Quantità abituale' });
   const unit = h('span'); const summary = h('p', { class: 'helper', role: 'status' }); const error = h('p', { class: 'form-error', role: 'alert' });
   const selected = () => foods.find(item => item.id === chosen.value) || foods[0];
-  const refresh = () => { const item = selected(); amount.value = usualFoodQuantity(item.id, item.food, data.usualQuantities, item.grams ?? 100); unit.textContent = item.food.unit; };
+  const refresh = () => { const item = selected(); const measure = quantitySpec(item.id, item.food);
+    for (const key of ['min', 'max', 'step']) amount.setAttribute(key, measure[key]);
+    amount.value = toDisplayAmount(item.id, item.food, usualFoodQuantity(item.id, item.food, data.usualQuantities, item.grams ?? 100)); unit.textContent = measure.unit; };
   chosen.addEventListener('change', refresh); refresh();
   const form = h('form', { onsubmit: event => {
     event.preventDefault(); if (!form.reportValidity()) return;
     try {
-      const item = selected(); const key = foodQuantityKey(item.id, item.food); const grams = amount.valueAsNumber;
+      const item = selected(); const key = foodQuantityKey(item.id, item.food); const measure = quantitySpec(item.id, item.food);
+      if (measure.unit === 'cucchiai' && Math.abs(amount.valueAsNumber * 4 - Math.round(amount.valueAsNumber * 4)) > 1e-8) throw new Error('Usa multipli di 0,25 cucchiai.');
+      const grams = toStoredAmount(item.id, item.food, amount.valueAsNumber);
       const next = clone(data); next.usualQuantities = { ...next.usualQuantities, [key]: { grams, unit: item.food.unit } };
       if (next.personalPortions) next.personalPortions = next.personalPortions.map(portion => foodQuantityKey(portion.id, portion.food) === key ? { ...portion, grams } : portion);
-      persist(next); error.textContent = ''; summary.textContent = unsaved ? 'Modifica solo in memoria: scarica un backup.' : `Quantità abituale salvata: ${item.food.name}, ${formatDecimal(grams)} ${item.food.unit}.`;
+      persist(next); error.textContent = ''; summary.textContent = unsaved ? 'Modifica solo in memoria: scarica un backup.' : `Quantità abituale salvata: ${item.food.name}, ${formatFoodAmount(item.id, item.food, grams)}.`;
     } catch (e) { error.textContent = e.message; }
   } }, h('div', { class: 'form-grid' }, field('Alimento', chosen), field('Quantità abituale', h('div', { class: 'gram-control' }, amount, unit))),
     error, h('button', { type: 'submit', class: 'button secondary' }, 'Salva quantità abituale'), summary);
@@ -1307,13 +1318,13 @@ function renderPersonalPortions() {
         let portionFit;
         const updated = () => {
           const original = day.meals.find(meal => meal.id === choice.value);
-          const ingredients = [...original.ingredients, { foodId: portion.id, grams: portion.grams, foodSnapshot: clone(portion.food) }];
+          const ingredients = [...original.ingredients, { foodId: portion.id, grams: quantizeFoodAmount(portion.id, portion.food, portion.grams), foodSnapshot: clone(portion.food) }];
           portionFit = adapt.checked ? fitForSlot(day, original, ingredients) : null;
           return mealFromIngredients({ ...original, ingredients: portionFit ? portionFit.ingredients : ingredients }, data.foodOverrides);
         };
         const refresh = () => { const meal = updated(); preview.replaceChildren(portionFit ? fitComparison(portionFit) : h('p', {}, `Pasto dopo l’aggiunta: ${round(meal.macros.kcal)} kcal · ${macroSummary(meal.macros)}`), ingredientList(meal.ingredients)); };
         choice.addEventListener('change', refresh); adapt.addEventListener('change', refresh); refresh();
-        showDialog(h('div', { class: 'dialog-content' }, dialogHeading('Aggiungi la tua porzione', `${portion.food.name} · ${formatDecimal(portion.grams)} ${portion.food.unit} · ${longDate(selectedDate)}`),
+        showDialog(h('div', { class: 'dialog-content' }, dialogHeading('Aggiungi la tua porzione', `${portion.food.name} · ${formatFoodAmount(portion.id, portion.food, portion.grams)} · ${longDate(selectedDate)}`),
           field('Pasto del diario', choice), h('label', { class: 'picker-remember' }, adapt, 'Adatta gli ingredienti ai macro del pasto'), preview, h('p', { class: 'helper' }, 'La porzione si aggiunge agli ingredienti presenti. Puoi modificarli dal diario. Il pasto resterà da mangiare.'),
           h('div', { class: 'dialog-actions' }, button('Annulla', closeDialog), button('Aggiungi porzione', () => {
             const result = updated();
@@ -1378,7 +1389,7 @@ function renderMethod() {
       h('dl', { class: 'activity-factors' }, ...ACTIVITY_LEVELS.map(level => h('div', {}, h('dt', {}, level.label.split(' · ')[0]), h('dd', {}, `× ${level.factor.toLocaleString('it-IT', { maximumFractionDigits: 3 })}`)))),
       h('p', {}, 'Per mantenere il peso usiamo questa stima. Per perdere peso sottraiamo il deficit in kcal scelto nel profilo: puoi indicare anche 0. I profili precedenti conservano il vecchio deficit del 10% finché non salvi una scelta esplicita. Per aumentare il peso applichiamo il 5% in più. Il consumo totale è una media che include gli allenamenti, senza calorie aggiunte per corsa o sala attrezzi.')),
     h('section', { class: 'panel method-panel' }, h('h2', {}, 'Proteine, carboidrati e grassi'),
-      h('p', {}, 'In Profilo puoi scegliere direttamente calorie, proteine e grassi. I carboidrati sono il residuo: (kcal − 4 × proteine − 9 × grassi) / 4. Con 2.200 kcal, 144 g di proteine e 80 g di grassi, il riferimento è 226 g di carboidrati. Il piano con cioccolato produce invece circa 2.200 kcal, 144 g di proteine, 82 g di grassi e 221 g di carboidrati dalle porzioni e dalle etichette. Sono quantità indicative, non una garanzia di deficit di 500 kcal.'),
+      h('p', {}, 'In Profilo puoi scegliere direttamente calorie, proteine e grassi. I carboidrati sono il residuo: (kcal − 4 × proteine − 9 × grassi) / 4. Con 2.200 kcal, 144 g di proteine e 80 g di grassi, il riferimento è 226 g di carboidrati. Il piano con cioccolato produce invece circa 2.200 kcal, 144 g di proteine, 83 g di grassi e 221 g di carboidrati dalle porzioni e dalle etichette. Sono quantità indicative, non una garanzia di deficit di 500 kcal.'),
       h('p', {}, 'Il piano con cioccolato propone la stessa colazione dopo corsa e pesi. Nei giorni di riposo puoi spostare la banana a colazione. Il cioccolato è una preferenza alimentare, senza un vantaggio specifico attribuito al recupero o alla sazietà. Le regole automatiche descritte sotto valgono quando non hai scelto obiettivi personali.'),
       h('p', {}, 'Le proteine partono da 1,6 g per kg di peso al giorno, oppure 1,8 g/kg durante il deficit. Sono valori orientativi entro l’intervallo descritto dalla ', source('posizione ISSN su proteine ed esercizio', 'https://doi.org/10.1186/s12970-017-0177-8'), ' per adulti sani che si allenano.'),
       h('p', {}, 'Il 30% dell’energia viene assegnato ai grassi; ai carboidrati va ciò che resta. Le proteine sono limitate al 35% dell’energia per lasciare spazio agli altri nutrienti: se questo limite si applica, vedrai un avviso.'),

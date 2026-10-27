@@ -210,15 +210,42 @@ test('lentil substitution absorbs its protein by reducing chicken and preserves 
   close(grams(reverse, 'pasta'), 80);
 });
 
-test('protein swap adjusts salmon carbohydrate and reduces added oil', () => {
+test('protein swap preserves protein and carbs and rounds added oil to quarter tablespoons', () => {
   const main = makeMeal([{ foodId: 'rice', grams: 100 }, { foodId: 'chicken', grams: 150 }, { foodId: 'vegetables', grams: 200 }, { foodId: 'olive-oil', grams: 25 }]);
   const salmon = swapMealFood(main, 'chicken', 'salmon');
   close(salmon.macros.carbs, main.macros.carbs);
   close(salmon.macros.protein, main.macros.protein);
-  close(salmon.macros.fat, main.macros.fat);
+  const otherFat = sumMacros(salmon.ingredients.filter(item => item.foodId !== 'olive-oil').map(item => foodMacros(item.foodId, item.grams))).fat;
+  const exactOil = (main.macros.fat - otherFat) / (getFood('olive-oil').fat / 100);
+  const quarterTablespoon = 13.5 / 4;
+  close(grams(salmon, 'olive-oil'), Math.round(exactOil / quarterTablespoon) * quarterTablespoon);
+  assert.ok(Math.abs(salmon.macros.fat - main.macros.fat) <= quarterTablespoon / 2 * getFood('olive-oil').fat / 100);
   assert.ok(grams(salmon, 'rice') < 100);
   assert.ok(grams(salmon, 'olive-oil') < 25);
   checkMeal(salmon);
+});
+
+test('new plans and alternatives use quarter tablespoon oil quantities and exact resulting macros', () => {
+  const targets = calculateTargets(profile);
+  for (const date of ['2026-10-23', '2026-10-24', '2026-10-25']) {
+    for (const meal of createDayPlan(profile, targets, date)) {
+      for (const option of [meal, ...mealAlternatives(meal, targets)]) {
+        for (const item of option.ingredients.filter(item => item.foodId === 'olive-oil')) {
+          close(item.grams / 3.375, Math.round(item.grams / 3.375));
+        }
+        checkMeal(option);
+      }
+    }
+  }
+});
+
+test('recomputing a historical meal preserves its unrounded oil grams', () => {
+  const original = makeMeal([{ foodId: 'olive-oil', grams: 17 }, { foodId: 'rice', grams: 80 }]);
+  const before = structuredClone(original);
+  const recomputed = mealFromIngredients(original);
+  close(grams(recomputed, 'olive-oil'), 17);
+  assert.deepEqual(recomputed, before);
+  assert.deepEqual(original, before);
 });
 
 test('two eggs with whites are practical and consecutive swaps remove previous companions', () => {

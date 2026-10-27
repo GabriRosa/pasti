@@ -1,4 +1,4 @@
-import { validateMealDistribution } from './recipe-fitting.js?v=20261027-recipes';
+import { validateMealDistribution } from './recipe-fitting.js?v=20261027-oil';
 import { getIngredientFood } from './foods.js?v=20261027-neutral';
 import { validatePersonalFood } from './barcode.js?v=20261027-neutral';
 import { calculateTargets } from './nutrition.js?v=20261027-neutral';

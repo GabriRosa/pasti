@@ -1,3 +1,4 @@
+import { normalizeOilIngredients } from './food-measures.js?v=20261027-oil';
 import { getFood, ingredientMacros } from './foods.js?v=20261027-neutral';
 import { calculateTargets, sumMacros } from './nutrition.js?v=20261027-neutral';
 import { trainingForDate } from './training.js?v=20261027-neutral';
@@ -53,7 +54,7 @@ function clockTime(minutes) {
 }
 
 function previewMeal(slot, title, ingredients, note, overrides, base = {}) {
-  return mealFromIngredients({ id: base.id ?? slot, slot, title, time: base.time ?? '', ingredients, note }, overrides);
+  return mealFromIngredients({ id: base.id ?? slot, slot, title, time: base.time ?? '', ingredients: normalizeOilIngredients(ingredients, overrides), note }, overrides);
 }
 
 function breakfastOptions(kcal, base, overrides) {

@@ -52,6 +52,12 @@ In **Alimenti → Le mie ricette base** trovi le 195 ricette di [Cibo Sano](http
 
 I campi facoltativi `personalRecipes` e `mealDistribution` restano nello schema 1 e sono inclusi nei backup. Ogni giorno può conservare la propria distribuzione. I vecchi backup rimangono importabili senza aggiungere ricette o percentuali ai dati storici.
 
+## Olio in cucchiai
+
+Nel diario, nelle ricette e nelle porzioni personali, l’olio si misura in cucchiai con incrementi di 0,25: per esempio 1,25, 1,5 e 1,75. Per il calcolo si usa un cucchiaio indicativo da 13,5 g, oppure 15 ml quando l’etichetta è per volume. Il riferimento di massa è la voce olio d’oliva delle [tabelle USDA](https://www.nal.usda.gov/sites/default/files/page-files/Total_Fat.pdf). La capacità dei cucchiai domestici può variare.
+
+I nuovi piani e gli adattamenti automatici arrotondano l’olio al quarto di cucchiaio e ricalcolano i macro sulla quantità arrotondata. I dati sono conservati in grammi o millilitri per mantenere il formato dei backup. I pasti già salvati restano invariati: quando la dose originale non coincide con un quarto di cucchiaio, la visualizzazione indica «circa». Aprire un pasto o una ricetta in modifica prepara la dose arrotondata; soltanto il salvataggio la applica.
+
 ## Dati personali
 
 [storage.js](src/storage.js) salva il profilo, le etichette personalizzate e il diario nella chiave `pasti.data.v1` del `localStorage`. Ogni giorno conserva il profilo e i pasti usati per quella data. Le registrazioni conservano un’istantanea dei valori al momento del consumo: un cambiamento del profilo o delle etichette non riscrive lo storico.
