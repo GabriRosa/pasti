@@ -198,7 +198,7 @@ function recordTraining(type) {
 function renderTrainingLog(day, planned) {
   const future = day.dateKey > localDate();
   const label = trainingLogLabel(day.trainingLog);
-  return h('section', { class: 'panel training-log-card', 'aria-labelledby': 'training-log-title' },
+  return h('section', { class: 'panel training-log-card', hidden: true, 'aria-labelledby': 'training-log-title' },
     h('div', { class: 'training-log-heading' }, h('div', {}, h('h2', { id: 'training-log-title', tabindex: '-1' }, 'Attività svolta'),
       h('p', { class: 'planned-training' }, `Previsto: ${planned.label}${planned.time ? ` alle ${planned.time}` : ''}`)),
       h('p', { class: `training-log-status${label ? ' recorded' : ''}`, role: 'status' }, label ? `Registrato: ${label}${day.trainingLog.source === 'strava_csv' ? ' · CSV Strava' : ''}` : 'Non ancora registrato')),
