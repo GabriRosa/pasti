@@ -1,4 +1,4 @@
-import { normalizeBarcode, lookupProduct, createBarcodeScanner, validatePersonalFood } from './barcode.js?v=20261027-compact-meals';
+import { normalizeBarcode, lookupProduct, createBarcodeScanner, validatePersonalFood } from './barcode.js?v=20261027-dark';
 
 export function renderPortions({ h, field, button, getPortions, save, remove, addToMeal, reportError }) {
   let disposed = false, request, searchVersion = 0;
