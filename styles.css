@@ -627,5 +627,9 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .fit-comparison { padding-block: 8px; }
 @media (max-width: 600px) {
   .recipes-panel, .distribution-panel, .usual-quantities-panel { padding: 16px; }
-  .distribution-table th, .distribution-table td { padding: 10px 5px; font-size: .85rem; }
+  .distribution-table { table-layout: fixed; }
+  .distribution-table th, .distribution-table td { padding: 10px 3px; font-size: .75rem; }
+  .distribution-table th:first-child { min-width: 0; width: 37%; }
+  .distribution-table thead th { font-size: .6rem; }
+  .distribution-table input { min-width: 0; padding: 10px 3px; font-size: 16px; }
 }
