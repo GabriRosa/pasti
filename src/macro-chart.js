@@ -2,7 +2,7 @@
 export const MACRO_CHART_KEYS = [
   { key: 'protein', name: 'Proteine', color: '#cc3434', factor: 4 },
   { key: 'fat', name: 'Grassi', color: '#f4ce46', factor: 9 },
-  { key: 'carbs', name: 'Carboidrati', color: '#ffffff', factor: 4 },
+  { key: 'carbs', name: 'Carboidrati', color: '#c8ccca', factor: 4 },
 ];
 export function macroGrams(value) {
   return value > 0 && value < 0.1 ? '<0,1' : value.toLocaleString('it-IT', { maximumFractionDigits: 1 });

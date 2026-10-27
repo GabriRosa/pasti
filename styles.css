@@ -200,9 +200,9 @@ main:focus { outline: none; }
 .section-heading p.weight-legend { font-size: .67rem; margin-top: 8px; line-height: 1.55; }
 .section-heading .eyebrow { margin-bottom: 9px; font-size: .65rem; }
 .meal-list { display: flex; flex-direction: column; gap: 14px; }
-.meal-card { background: var(--paper); border: 1px solid var(--line); border-radius: 19px; display: grid; grid-template-columns: 78px minmax(0, 1fr); padding: 24px 28px 22px 20px; }
+.meal-card { background: #0b0d0c; border: 1px solid var(--line); border-radius: 19px; display: grid; grid-template-columns: 78px minmax(0, 1fr); padding: 24px 28px 22px 20px; }
 .meal-card.eaten { border-color: var(--line); }
-.meal-card.skipped { background: var(--surface); }
+.meal-card.skipped { background: #0b0d0c; }
 .meal-card.skipped .ingredient-list, .meal-card.skipped .meal-macros { opacity: .65; }
 .meal-rail { display: flex; flex-direction: column; align-items: center; padding-right: 18px; gap: 10px; }
 .meal-index { display: inline-flex; align-items: center; justify-content: center; width: 37px; height: 37px; border: 1px solid var(--line); border-radius: 50%; background: var(--surface); color: var(--ink-soft); font-size: .68rem; font-variant-numeric: tabular-nums; }

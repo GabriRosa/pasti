@@ -1,6 +1,6 @@
-import { getFood, ingredientMacros } from './foods.js?v=20261027-dark';
-import { calculateTargets, sumMacros } from './nutrition.js?v=20261027-dark';
-import { trainingForDate } from './training.js?v=20261027-dark';
+import { getFood, ingredientMacros } from './foods.js?v=20261027-black-cards';
+import { calculateTargets, sumMacros } from './nutrition.js?v=20261027-black-cards';
+import { trainingForDate } from './training.js?v=20261027-black-cards';
 
 export const MEAL_SLOTS = Object.freeze([
   { id: 'preworkout', label: 'Prima dell’allenamento · facoltativo' },
