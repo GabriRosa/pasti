@@ -1,6 +1,6 @@
-import { getFood, foodMacros } from './foods.js?v=20261026-chocolate-plan';
-import { calculateTargets, sumMacros } from './nutrition.js?v=20261026-chocolate-plan';
-import { trainingForDate } from './training.js?v=20261026-chocolate-plan';
+import { getFood, ingredientMacros } from './foods.js?v=20261027-barcode';
+import { calculateTargets, sumMacros } from './nutrition.js?v=20261027-barcode';
+import { trainingForDate } from './training.js?v=20261027-barcode';
 
 export const MEAL_SLOTS = Object.freeze([
   { id: 'preworkout', label: 'Prima dell’allenamento · facoltativo' },
@@ -27,10 +27,10 @@ export function mealFromIngredients(meal, overrides = {}) {
   validateMeal(meal);
   const ingredients = meal.ingredients.map(item => {
     if (!item || typeof item.foodId !== 'string') throw new Error('Un ingrediente non è valido.');
-    foodMacros(item.foodId, item.grams, overrides);
-    return { foodId: item.foodId, grams: item.grams };
+    ingredientMacros(item, overrides);
+    return { foodId: item.foodId, grams: item.grams, ...(item.foodSnapshot ? { foodSnapshot: { ...item.foodSnapshot } } : {}) };
   });
-  return { ...meal, ingredients, macros: sumMacros(ingredients.map(item => foodMacros(item.foodId, item.grams, overrides))) };
+  return { ...meal, ingredients, macros: sumMacros(ingredients.map(item => ingredientMacros(item, overrides))) };
 }
 
 function dayNumber(dateKey) {
@@ -59,7 +59,7 @@ function previewMeal(slot, title, ingredients, note, overrides, base = {}) {
 function breakfastOptions(kcal, base, overrides) {
   // Keep packaged desserts at one labeled tub; adjust the accompanying cereal.
   const build = (title, fixed, cerealId, low, high, note) => {
-    const fixedKcal = sumMacros(fixed.map(item => foodMacros(item.foodId, item.grams, overrides))).kcal;
+    const fixedKcal = sumMacros(fixed.map(item => ingredientMacros(item, overrides))).kcal;
     const cerealKcal = getFood(cerealId, overrides).kcal;
     if (cerealKcal <= 0) throw new Error('Per preparare le alternative, il cereale deve avere energia maggiore di zero.');
     const grams = clamp((kcal - fixedKcal) * 100 / cerealKcal, low, high);
@@ -218,7 +218,7 @@ function mainMeal(base, wanted, carbId, proteinId, overrides, fixed = [ingredien
     allFixed.push(ingredient('eggs', 100));
     adjustableProtein = 'egg-whites';
   }
-  const fixedMacros = sumMacros(allFixed.map(item => foodMacros(item.foodId, item.grams, overrides)));
+  const fixedMacros = sumMacros(allFixed.map(item => ingredientMacros(item, overrides)));
   const range = bounds(carbId, adjustableProtein);
   // A companion is optional when the two eggs and the cereal already suffice.
   if (proteinId === 'eggs') range.protein = [0, 300];
@@ -235,7 +235,7 @@ function mainMeal(base, wanted, carbId, proteinId, overrides, fixed = [ingredien
   if (amounts[3] > 1e-7) ingredients.push(ingredient('olive-oil', amounts[3]));
   const cookMinutes = Math.max({ pasta: 20, rice: 25, couscous: 10, potatoes: 35, 'lentil-pasta-lidl': 20, 'lentil-pasta-lidl-fresh': 15 }[carbId],
     { chicken: 20, eggs: 15, 'egg-whites': 10, salmon: 20, tuna: 5, 'pork-tenderloin': 25, turkey: 20, cod: 20 }[proteinId]);
-  const macros = sumMacros(ingredients.map(item => foodMacros(item.foodId, item.grams, overrides)));
+  const macros = sumMacros(ingredients.map(item => ingredientMacros(item, overrides)));
   const deviations = ['protein', 'carbs', 'fat'].some(key => Math.abs(macros[key] - wanted[key]) > Math.max(4, wanted[key] * 0.12));
   let note = `${cookMinutes}–${cookMinutes + 5} minuti indicativi, preparazioni in parallelo. Pesi prima della cottura: pasta secca a secco, pasta fresca come da confezione; tonno sgocciolato. Verdure e tutto l’olio usato sono inclusi.`;
   const hasEggWhites = proteinId === 'eggs' && ingredients.some(item => item.foodId === 'egg-whites');
@@ -264,7 +264,7 @@ function chocolateBreakfastOptions(base, overrides) {
   const options = [reference];
   for (const dairyId of ['protein-pudding-lidl', 'protein-pudding-lidl-vanilla', 'protein-mousse-lidl', 'protein-mousse-lidl-vanilla']) {
     const fixed = reference.ingredients.filter(item => !['greek-yogurt-fage', 'oats'].includes(item.foodId));
-    const fixedMacros = sumMacros(fixed.map(item => foodMacros(item.foodId, item.grams, overrides)));
+    const fixedMacros = sumMacros(fixed.map(item => ingredientMacros(item, overrides)));
     const dairy = getFood(dairyId, overrides); const oats = getFood('oats', overrides);
     const kcal = reference.macros.kcal - fixedMacros.kcal;
     const protein = reference.macros.protein - fixedMacros.protein;

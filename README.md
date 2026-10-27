@@ -26,6 +26,18 @@ Le schede Lidl identificano le confezioni verificate: sedanini secchi Combino, f
 
 Quando cambi il carboidrato di pranzo o cena, il piano adatta anche carne, pesce o uova e mostra le porzioni prima e dopo la scelta. Le proteine della pasta di lenticchie e degli altri ingredienti contribuiscono già al totale.
 
+## Codici a barre e porzioni personali
+
+In **Alimenti → Inquadra codice a barre** puoi leggere un EAN/UPC con la fotocamera. Sono accettati codici di 8, 12, 13 o 14 cifre con controllo della cifra finale. Puoi anche scrivere il codice o inserire il prodotto a mano. La fotocamera richiede HTTPS (oppure localhost) e il permesso del browser.
+
+La ricerca consulta [Open Food Facts](https://world.openfoodfacts.org), con attribuzione [ODbL](https://opendatacommons.org/licenses/odbl/1-0/). Controlla i valori con la confezione: i campi mancanti restano vuoti e devono essere completati. Scegli la base per 100 g o 100 ml e la quantità della porzione per vedere subito calorie e macro. Non viene applicata una conversione tra peso e volume.
+
+**Salva porzione personale** conserva fino a 200 porzioni locali. Da ciascuna scheda puoi modificare la porzione, eliminarla oppure aggiungerla a un pasto del giorno selezionato nel diario. L’anteprima mostra i nuovi totali; l’aggiunta non segna il pasto come mangiato e non riduce automaticamente gli altri ingredienti. Dal diario puoi modificare la quantità o rimuovere l’ingrediente personale. Le copie già aggiunte ai pasti non cambiano quando aggiorni o elimini la porzione originale.
+
+[barcode.js](src/barcode.js) legge l’API Open Food Facts v3.6, usa soltanto nutrienti normalizzati per 100 g/ml del prodotto come venduto e annulla le richieste dopo 15 secondi. Un errore di rete o un prodotto assente consente comunque l’inserimento manuale. Il lettore [ZXing Browser 0.2.1](src/vendor/README.md) viene caricato dai file locali del sito solo quando richiesto. Il flusso video viene chiuso anche in caso di navigazione, pagina nascosta o autorizzazione tardiva dopo la chiusura. Nessuna immagine viene trasmessa.
+
+[portions-ui.js](src/portions-ui.js) gestisce ricerca, anteprima ed elenco. L’archivio mantiene lo schema 1: `personalPortions` è facoltativo nei vecchi backup; gli ingredienti personali includono un `foodSnapshot` validato. [barcode.test.mjs](tests/barcode.test.mjs) verifica codici, nutrienti mancanti, unità, annullamento e ciclo della fotocamera con flussi simulati. I test di integrazione coprono salvataggio, aggiunta, modifica nel pasto, consumo, eliminazione e backup.
+
 ## Dati personali
 
 [storage.js](src/storage.js) salva il profilo, le etichette personalizzate e il diario nella chiave `pasti.data.v1` del `localStorage`. Ogni giorno conserva il profilo e i pasti usati per quella data. Le registrazioni conservano un’istantanea dei valori al momento del consumo: un cambiamento del profilo o delle etichette non riscrive lo storico.

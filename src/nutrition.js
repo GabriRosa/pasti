@@ -1,4 +1,4 @@
-import { validateTrainingPlan } from './training.js?v=20261026-chocolate-plan';
+import { validateTrainingPlan } from './training.js?v=20261027-barcode';
 
 /** Estimates for healthy adults. See docs/nutrition.md for assumptions and sources. */
 export const ACTIVITY_LEVELS = Object.freeze([

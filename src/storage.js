@@ -1,5 +1,6 @@
-import { calculateTargets } from './nutrition.js?v=20261026-chocolate-plan';
-import { validateTrainingPlan, validateTrainingLog } from './training.js?v=20261026-chocolate-plan';
+import { validatePersonalFood } from './barcode.js?v=20261027-barcode';
+import { calculateTargets } from './nutrition.js?v=20261027-barcode';
+import { validateTrainingPlan, validateTrainingLog } from './training.js?v=20261027-barcode';
 
 /** Local-only, versioned persistence. All writes validate before replacing data. */
 export const STORAGE_KEY = 'pasti.data.v1';
@@ -84,8 +85,12 @@ function meal(value) {
   text(value.note, 2000, 'nota pasto.', true);
   if (!Array.isArray(value.ingredients) || value.ingredients.length < 1 || value.ingredients.length > 30) fail('ingredienti.');
   value.ingredients.forEach(item => {
-    keys(item, ['foodId', 'grams'], 'ingrediente');
+    keys(item, ['foodId', 'grams', 'foodSnapshot'], 'ingrediente');
     text(item.foodId, 100, 'alimento.');
+    if (item.foodSnapshot !== undefined) {
+      if (!/^personal-[a-zA-Z0-9-]{1,80}$/.test(item.foodId)) fail('identificativo personale.');
+      validatePersonalFood(item.foodSnapshot);
+    } else if (item.foodId.startsWith('personal-')) fail('valori del prodotto personale mancanti.');
     number(item.grams, 0, 10000, 'grammi.');
   });
   macros(value.macros);
@@ -120,7 +125,7 @@ function day(value, key) {
 }
 export function validateData(data) {
   safeTree(data);
-  keys(data, ['schemaVersion', 'profile', 'foodOverrides', 'days'], 'documento');
+  keys(data, ['schemaVersion', 'profile', 'foodOverrides', 'days', 'personalPortions'], 'documento');
   if (data.schemaVersion !== SCHEMA_VERSION) fail('versione non supportata.');
   if (data.profile !== null) validateProfile(data.profile);
   object(data.foodOverrides, 'etichette alimentari.');
@@ -128,6 +133,15 @@ export function validateData(data) {
   for (const [id, values] of Object.entries(data.foodOverrides)) {
     text(id, 100, 'alimento personalizzato.'); macros(values);
     if (values.protein > 100 || values.carbs > 100 || values.fat > 100 || values.kcal > 1000) fail('etichetta per 100 g.');
+  }
+  if (data.personalPortions !== undefined) {
+    if (!Array.isArray(data.personalPortions) || data.personalPortions.length > 200) fail('massimo 200 porzioni personali.');
+    const ids = new Set();
+    for (const portion of data.personalPortions) {
+      keys(portion, ['id', 'food', 'grams'], 'porzione personale');
+      if (typeof portion.id !== 'string' || !/^personal-[a-zA-Z0-9-]{1,80}$/.test(portion.id) || ids.has(portion.id)) fail('identificativo porzione.');
+      ids.add(portion.id); validatePersonalFood(portion.food); number(portion.grams, 0.1, 3000, 'quantità della porzione.');
+    }
   }
   object(data.days, 'diario.');
   if (Object.keys(data.days).length > 10000) fail('diario troppo grande.');

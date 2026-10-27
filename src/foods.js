@@ -1,3 +1,4 @@
+import { validatePersonalFood } from './barcode.js?v=20261027-barcode';
 const crea = code => `https://www.alimentinutrizione.it/tabelle-nutrizionali/${code}`;
 const food = (id, name, group, kcal, protein, carbs, fat, unitNote, source, estimated = false, label) =>
   Object.freeze({ id, name, group, kcal, protein, carbs, fat, unitNote, source, estimated, unit: id == 'skim-milk' ? 'ml' : 'g',
@@ -102,4 +103,18 @@ export function foodMacros(id, grams, overrides = {}) {
   const result = Object.fromEntries(MACROS.map(key => [key, item[key] * (grams / 100)]));
   if (Object.values(result).some(value => !Number.isFinite(value))) throw new Error('La quantità o i valori nutrizionali sono troppo grandi.');
   return result;
+}
+
+export function getIngredientFood(item, overrides = {}) {
+  if (item.foodSnapshot !== undefined) {
+    if (!/^personal-[a-zA-Z0-9-]{1,80}$/.test(item.foodId)) throw new Error('Identificativo prodotto personale non valido.');
+    const food = validatePersonalFood(item.foodSnapshot);
+    return { ...food, id: item.foodId, unitNote: `Valori della tua etichetta per 100 ${food.unit}.`, group: 'personal' };
+  }
+  return getFood(item.foodId, overrides);
+}
+export function ingredientMacros(item, overrides = {}) {
+  const food = getIngredientFood(item, overrides);
+  if (typeof item.grams !== 'number' || !Number.isFinite(item.grams) || item.grams < 0 || item.grams > 10000) throw new Error('Quantità non valida.');
+  return Object.fromEntries(MACROS.map(key => [key, food[key] * item.grams / 100]));
 }

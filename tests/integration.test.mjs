@@ -367,6 +367,9 @@ class MemoryElement {
     if (this.parentNode) this.parentNode.children = this.parentNode.children.filter(child => child !== this);
     this.parentNode = null;
   }
+  removeEventListener(name, listener) {
+    this.events.set(name, (this.events.get(name) || []).filter(item => item !== listener));
+  }
   addEventListener(name, listener) {
     if (!this.events.has(name)) this.events.set(name, []);
     this.events.get(name).push(listener);
@@ -442,6 +445,7 @@ async function bootApp(t, store, hash = 'today', health = {}) {
   const document = {
     body, head, activeElement: body, visibilityState: 'visible',
     addEventListener: documentEvents.addEventListener.bind(documentEvents),
+    removeEventListener: documentEvents.removeEventListener.bind(documentEvents),
     dispatch: documentEvents.dispatch.bind(documentEvents),
     querySelector: selector => body.querySelector(selector),
     querySelectorAll: selector => body.querySelectorAll(selector),
@@ -2163,4 +2167,38 @@ test('personal menu selection saves fixed targets and applies only to uneaten cu
   navigate('profile');
   assert.equal(document.querySelector('[name="targetMode"]').value,'fixed');
   assert.equal(document.querySelector('[name="routineNotes"]').textContent,'Passi e allenamenti annotati localmente.');
+});
+
+test('personal product can be saved, added, consumed and deleted without changing diary snapshots', async t => {
+  const key = todayKey(), initial = generatedDiary(key), store = new MemoryStorage();
+  saveData(initial, store);
+  const { document, navigate } = await bootApp(t, store, 'foods');
+  const buttonWith = text => document.querySelectorAll('button').find(b => b.textContent === text);
+  buttonWith('Inserisci prodotto a mano').click();
+  const form = document.querySelector('.portion-editor');
+  const inputs = form.querySelectorAll('input');
+  for (const [input, value] of inputs.map((input, i) => [input, ['Mousse test', 'Marca test', '76', '10', '5.8', '1.4', '175'][i]])) { input.value = value; input.dispatch('input'); }
+  assert.match(document.querySelector('.portion-totals').textContent, /133 kcal/);
+  form.dispatch('submit');
+  const saved = loadData(store).data.personalPortions[0]; assert.equal(saved.grams, 175);
+  buttonWith('Aggiungi a un pasto').click();
+  const select = document.querySelector('#app-dialog select');
+  const lunch = initial.days[key].meals.find(m => m.slot === 'lunch'); select.value = lunch.id; select.dispatch('change');
+  buttonWith('Aggiungi porzione').click();
+  let updated = loadData(store).data.days[key].meals.find(m => m.id === lunch.id);
+  assert.equal(updated.ingredients.at(-1).foodSnapshot.name, 'Mousse test');
+  assert.ok(Math.abs(updated.macros.kcal - lunch.macros.kcal - 133) < 1e-7);
+  navigate('today');
+  const card = document.querySelectorAll('.meal-card').find(c => c.textContent.includes('Mousse test'));
+  card.querySelectorAll('button').find(b => b.textContent === 'Modifica porzioni e alternative').click();
+  const quantity = document.querySelectorAll('.edit-ingredients input').at(-1); quantity.value = '150'; quantity.dispatch('input');
+  buttonWith('Salva questo pasto').click();
+  const editedCard = document.querySelectorAll('.meal-card').find(c => c.textContent.includes('Mousse test'));
+  editedCard.querySelectorAll('button').find(b => b.textContent === 'Segna mangiato').click();
+  const consumed = structuredClone(loadData(store).data.days[key].consumed[lunch.id]);
+  assert.equal(consumed.meal.ingredients.at(-1).grams, 150);
+  navigate('foods'); buttonWith('Elimina').click(); buttonWith('Elimina porzione').click();
+  const final = loadData(store).data;
+  assert.equal(final.personalPortions.length, 0); assert.deepEqual(final.days[key].consumed[lunch.id], consumed);
+  assert.deepEqual(parseBackup(exportBackup(final)), final);
 });

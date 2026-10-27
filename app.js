@@ -1,12 +1,13 @@
-import { ACTIVITY_LEVELS, calculateTargets, sumMacros } from './src/nutrition.js?v=20261026-chocolate-plan';
-import { FOODS, LIDL_FOOD_IDS, getFood } from './src/foods.js?v=20261026-chocolate-plan';
-import { createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } from './src/planner.js?v=20261026-chocolate-plan';
-import { trainingForDate, validateTrainingPlan, TRAINING_LOG_TYPES, validateTrainingLog, trainingLogLabel } from './src/training.js?v=20261026-chocolate-plan';
-import { parseActivityCsv, suggestActivityColumns, summarizeActivityCsv } from './src/activity-import.js?v=20261026-chocolate-plan';
-import { STORAGE_KEY, MAX_BACKUP_BYTES, createEmptyData, validateData, parseBackup, loadData, saveData, exportBackup, clearData } from './src/storage.js?v=20261026-chocolate-plan';
-import { GOOGLE_HEALTH_CLIENT_ID } from './src/google-health-config.js?v=20261026-chocolate-plan';
-import { createGoogleHealthSession } from './src/google-health-session.js?v=20261026-chocolate-plan';
-import { prepareGoogleHealthConsumedMeal } from './src/google-health-nutrition.js?v=20261026-chocolate-plan';
+import { renderPortions } from './src/portions-ui.js?v=20261027-barcode';
+import { ACTIVITY_LEVELS, calculateTargets, sumMacros } from './src/nutrition.js?v=20261027-barcode';
+import { FOODS, LIDL_FOOD_IDS, getFood, getIngredientFood } from './src/foods.js?v=20261027-barcode';
+import { createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } from './src/planner.js?v=20261027-barcode';
+import { trainingForDate, validateTrainingPlan, TRAINING_LOG_TYPES, validateTrainingLog, trainingLogLabel } from './src/training.js?v=20261027-barcode';
+import { parseActivityCsv, suggestActivityColumns, summarizeActivityCsv } from './src/activity-import.js?v=20261027-barcode';
+import { STORAGE_KEY, MAX_BACKUP_BYTES, createEmptyData, validateData, parseBackup, loadData, saveData, exportBackup, clearData } from './src/storage.js?v=20261027-barcode';
+import { GOOGLE_HEALTH_CLIENT_ID } from './src/google-health-config.js?v=20261027-barcode';
+import { createGoogleHealthSession } from './src/google-health-session.js?v=20261027-barcode';
+import { prepareGoogleHealthConsumedMeal } from './src/google-health-nutrition.js?v=20261027-barcode';
 
 const $ = selector => document.querySelector(selector);
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -29,6 +30,7 @@ let labelFoodId = 'lentil-pasta-lidl';
 let toastTimer;
 let returnFocus;
 let healthRenderQueued = false;
+let disposePortions;
 const healthSession = createGoogleHealthSession({ clientId: GOOGLE_HEALTH_CLIENT_ID, onChange: () => {
   if (healthRenderQueued) return;
   healthRenderQueued = true;
@@ -120,6 +122,7 @@ function storageNotice() {
 }
 
 function render() {
+  disposePortions?.(); disposePortions = null;
   const hash = location.hash.slice(1);
   page = ['today', 'profile', 'foods', 'method'].includes(hash) ? hash : 'today';
   document.querySelectorAll('[data-page]').forEach(link => {
@@ -531,7 +534,7 @@ function renderToday() {
 }
 
 function ingredientText(ingredient) {
-  return `${getFood(ingredient.foodId, data.foodOverrides).name} · ${formatDecimal(ingredient.grams)} ${getFood(ingredient.foodId).unit}`;
+  return `${getIngredientFood(ingredient, data.foodOverrides).name} · ${formatDecimal(ingredient.grams)} ${getIngredientFood(ingredient).unit}`;
 }
 
 function renderMeal(meal, day, index) {
@@ -589,7 +592,7 @@ function editMeal(original) {
     adaptation.hidden = changes.length === 0;
     adaptation.replaceChildren(...(changes.length ? [
       h('strong', {}, 'Porzioni adattate automaticamente'),
-      h('ul', {}, ...changes.map(id => h('li', {}, h('span', {}, getFood(id).name), h('span', { class: 'portion-change' },
+      h('ul', {}, ...changes.map(id => h('li', {}, h('span', {}, getIngredientFood(draft.ingredients.find(item => item.foodId === id) || before.ingredients.find(item => item.foodId === id)).name), h('span', { class: 'portion-change' },
         !previous.has(id) ? `Aggiunto: ${formatDecimal(current.get(id))} g` : !current.has(id) ? `${formatDecimal(previous.get(id))} g → rimosso` : `${formatDecimal(previous.get(id))} → ${formatDecimal(current.get(id))} g`)))),
     ] : []));
   };
@@ -615,7 +618,7 @@ function editMeal(original) {
       }
     }
     ingredientFields.replaceChildren(...draft.ingredients.map((ingredient, index) => {
-      const food = getFood(ingredient.foodId, data.foodOverrides);
+      const food = getIngredientFood(ingredient, data.foodOverrides);
       const grams = h('input', { id: `ingredient-${index}`, type: 'number', min: '0', max: '3000', step: '0.1', inputmode: 'decimal', value: Number(ingredient.grams.toFixed(1)), 'aria-label': `${food.name}, ${food.unit === 'ml' ? 'millilitri' : 'grammi'}`, oninput: event => {
         adaptation.hidden = true;
         adaptation.replaceChildren();
@@ -624,7 +627,7 @@ function editMeal(original) {
         draft.ingredients[index].grams = value;
         updateTotals();
       } });
-      return h('div', { class: 'edit-ingredient' }, h('div', {}, h('label', { for: `ingredient-${index}` }, food.name), h('small', {}, food.unitNote)), h('div', { class: 'gram-control' }, grams, h('span', {}, food.unit)));
+      return h('div', { class: 'edit-ingredient' }, h('div', {}, h('label', { for: `ingredient-${index}` }, food.name), h('small', {}, food.unitNote)), h('div', { class: 'gram-control' }, grams, h('span', {}, food.unit)), ingredient.foodSnapshot && button('Rimuovi', () => { draft.ingredients.splice(index, 1); rebuild(); }, 'text-button'));
     }));
     updateTotals();
   };
@@ -886,7 +889,7 @@ function confirmAction(title, description, actionLabel, action, destructive = fa
 }
 
 function validateDomain(imported) {
-  const checkMeal = meal => meal.ingredients.forEach(ingredient => getFood(ingredient.foodId, imported.foodOverrides));
+  const checkMeal = meal => meal.ingredients.forEach(ingredient => getIngredientFood(ingredient, imported.foodOverrides));
   if (imported.profile) calculateTargets(imported.profile);
   Object.keys(imported.foodOverrides).forEach(id => getFood(id, imported.foodOverrides));
   for (const day of Object.values(imported.days)) {
@@ -993,6 +996,52 @@ function labelReference(item) {
     h('a', { href: label.evidenceUrl, target: '_blank', rel: 'noopener noreferrer' }, 'Vedi l’etichetta ↗'));
 }
 
+function renderPersonalPortions() {
+  const panel = renderPortions({ h, field, button, getPortions: () => data.personalPortions ?? [],
+    reportError: message => notify(message, true),
+    save: portion => {
+      const next = clone(data);
+      const portions = next.personalPortions ?? [];
+      const index = portions.findIndex(item => item.id === portion.id);
+      if (index < 0) portions.push(portion); else portions[index] = portion;
+      next.personalPortions = portions; persist(next);
+      if (unsaved) throw new Error('Porzione presente solo in memoria: il salvataggio è bloccato. Scarica un backup.');
+    },
+    remove: portion => {
+      confirmAction('Eliminare la porzione?', 'La porzione sparirà dalle tue scelte. I pasti già salvati nel diario manterranno i loro valori.', 'Elimina porzione', () => {
+        const next = clone(data); next.personalPortions = (next.personalPortions ?? []).filter(item => item.id !== portion.id); persist(next);
+      }, true);
+      return false;
+    },
+    addToMeal: portion => {
+      if (!data.profile) { notify('Completa prima il profilo per creare i pasti del diario.', true); return; }
+      try {
+        const day = getDay();
+        const available = day.meals.filter(meal => !day.consumed[meal.id] && !day.skipped.includes(meal.id));
+        if (!available.length) { notify('Tutti i pasti di questo giorno sono già registrati o saltati. Scegli un altro giorno nel diario.', true); return; }
+        const choice = h('select', {}, ...available.map(meal => h('option', { value: meal.id }, `${meal.time} · ${meal.title}`)));
+        const preview = h('p', { class: 'notice compact' });
+        const updated = () => {
+          const original = day.meals.find(meal => meal.id === choice.value);
+          return mealFromIngredients({ ...original, ingredients: [...original.ingredients, { foodId: portion.id, grams: portion.grams, foodSnapshot: clone(portion.food) }] }, data.foodOverrides);
+        };
+        const refresh = () => { const m = updated().macros; preview.textContent = `Pasto dopo l’aggiunta: ${round(m.kcal)} kcal · P ${formatDecimal(m.protein)} g · C ${formatDecimal(m.carbs)} g · G ${formatDecimal(m.fat)} g`; };
+        choice.addEventListener('change', refresh); refresh();
+        showDialog(h('div', { class: 'dialog-content' }, dialogHeading('Aggiungi la tua porzione', `${portion.food.name} · ${formatDecimal(portion.grams)} ${portion.food.unit} · ${longDate(selectedDate)}`),
+          field('Pasto del diario', choice), preview, h('p', { class: 'helper' }, 'La porzione si aggiunge agli ingredienti presenti. Puoi modificarli dal diario. Il pasto resterà da mangiare.'),
+          h('div', { class: 'dialog-actions' }, button('Annulla', closeDialog), button('Aggiungi porzione', () => {
+            const result = updated();
+            if (updateDay(target => {
+              if (target.consumed[choice.value] || target.skipped.includes(choice.value)) throw new Error('Questo pasto non è più modificabile.');
+              target.meals = target.meals.map(meal => meal.id === result.id ? result : meal);
+            })) { closeDialog(); notify(unsaved ? 'Aggiunta solo in memoria: scarica un backup.' : 'Porzione aggiunta al pasto del diario.'); }
+          }, 'button primary'))));
+      } catch (error) { notify(error.message, true); }
+    },
+  });
+  disposePortions = panel.dispose; return panel.element;
+}
+
 function renderFoods() {
   const food = getFood(labelFoodId, data.foodOverrides);
   const orderedFoods = [...LIDL_FOOD_IDS.map(id => FOODS.find(item => item.id === id)).filter(Boolean), ...FOODS.filter(item => !LIDL_FOOD_IDS.includes(item.id))];
@@ -1014,7 +1063,8 @@ function renderFoods() {
       getFood(labelFoodId, next.foodOverrides); persist(next); render(); if (!unsaved) notify('Etichetta salvata per i nuovi piani.');
     } catch (error) { formError.textContent = error.message; }
   });
-  return h('div', { class: 'page foods-page' }, pageTitle('QUELLO CHE MANGI', 'Alimenti e quantità.', 'Valori per 100 g, oppure per 100 ml di latte. La confezione che hai in mano è il riferimento.'),
+  const portions = renderPersonalPortions();
+  return h('div', { class: 'page foods-page' }, pageTitle('QUELLO CHE MANGI', 'Alimenti e quantità.', 'Valori per 100 g, oppure per 100 ml di latte. La confezione che hai in mano è il riferimento.'), portions,
     h('section', { class: 'panel label-panel' }, h('div', { class: 'section-heading' }, h('div', {}, h('p', { class: 'eyebrow' }, 'IL RIFERIMENTO PER OGNI VARIANTE'), h('h2', {}, 'Etichette e valori nutrizionali'), h('p', {}, 'I valori delle varianti sono già inseriti. Puoi modificarli facoltativamente per una confezione diversa.'))), form),
     h('section', { class: 'panel refresh-panel' }, h('div', {}, h('h2', {}, 'Hai già pianificato i prossimi pasti?'), h('p', {}, 'Puoi aggiornarne i valori nutrizionali e le note di riferimento senza cambiare i grammi. I pasti mangiati, i giorni passati e le tue etichette personali restano invariati.')),
       button('Aggiorna i pasti da oggi in poi', refreshPlannedMeals, 'button secondary', { disabled: Boolean(storageReadError || storageConflict) })),
