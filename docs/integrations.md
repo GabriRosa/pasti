@@ -22,7 +22,7 @@ Disconnetti cancella dalla sessione token e risultati; per revocare il permesso 
 
 ### Accesso mantenuto tra le aperture
 
-La [versione Cloudflare](persistent-access.md) aggiunge un servizio per conservare credenziali cifrate e rinnovare il collegamento attraverso un cookie protetto. Il servizio è pubblicato su [Pasti con accesso mantenuto](https://pasti.gabri-rosso02.workers.dev/) con Workers Free e D1 Free; database, segreti e redirect sono configurati. Il primo consenso e il ripristino reale della sessione restano da verificare. La versione GitHub Pages mantiene il flusso descritto sopra.
+La [versione Cloudflare](persistent-access.md) aggiunge un servizio per conservare credenziali cifrate e rinnovare il collegamento attraverso un cookie protetto. Il servizio è pubblicato su [Pasti con accesso mantenuto](https://pasti.gabri-rosso02.workers.dev/) con Workers Free e D1 Free; database, segreti e redirect sono configurati. Il consenso, la lettura reale e il ripristino dopo ricarica e riapertura sono stati verificati in Chrome il 27 ottobre 2026. Il rinnovo alla scadenza del token breve è verificato dai test automatici; resta da osservarlo dal vivo. La versione GitHub Pages mantiene il flusso descritto sopra.
 
 ### Configurazione dell’installazione
 
