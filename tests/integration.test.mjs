@@ -3047,3 +3047,87 @@ test('meal recipe chooser keeps distinct personal recipes with the same name sel
   assert.deepEqual(saved.days[key].consumed, {});
   assert.deepEqual(saved.days[key].meals.filter(item => item.id !== lunchId), initial.days[key].meals.filter(item => item.id !== lunchId));
 });
+
+for (const exit of ['Cerca', 'Chiudi aggiunta', 'Chiudi aggiunta e Cambia ricetta']) {
+  test(`leaving barcode lookup via ${exit} ignores its late result and preserves the meal draft`, async t => {
+    const key = todayKey(), initial = generatedDiary(key), store = new MemoryStorage(); saveData(initial, store);
+    let resolveRequest, signal;
+    const { document } = await bootApp(t, store, 'today', { fetchImpl: (_url, options) => {
+      signal = options.signal;
+      return new Promise(resolve => { resolveRequest = resolve; });
+    } });
+    openComposer(document);
+    const grams = document.querySelector('.edit-ingredients input');
+    grams.value = '120'; grams.dispatch('input');
+    openFoodPicker(document, 'Codice a barre');
+    fillComposer(document, '.picker-barcode-form input', '036000291452');
+    document.querySelector('.picker-barcode-form').dispatch('submit');
+    assert.equal(signal.aborted, false);
+    clickText(document.querySelector('.meal-food-picker'), exit === 'Cerca' ? 'Cerca' : 'Chiudi aggiunta');
+    if (exit === 'Chiudi aggiunta e Cambia ricetta') clickText(document.querySelector('#app-dialog'), 'Cambia ricetta');
+    assert.equal(signal.aborted, true);
+    resolveRequest({ ok: true, json: async () => barcodeFixture() });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(document.querySelector('.picker-manual-form'), null, 'The old barcode result must not reopen a completed step');
+    if (exit === 'Chiudi aggiunta e Cambia ricetta') {
+      assert.ok(isVisible(document.querySelector('.recipe-chooser')));
+      clickText(document.querySelector('.recipe-chooser'), '← Torna agli ingredienti');
+    }
+    assert.ok(isVisible(document.querySelector('.meal-editor-view')));
+    assert.equal(document.querySelector('.edit-ingredients input'), grams);
+    assert.equal(grams.valueAsNumber, 120);
+    assert.equal(document.querySelectorAll('.edit-ingredient').length, initial.days[key].meals[0].ingredients.length);
+    if (exit !== 'Cerca') {
+      assert.equal(isVisible(document.querySelector('.picker-chooser')), false);
+      openFoodPicker(document, 'Codice a barre');
+    } else clickText(document.querySelector('.meal-food-picker'), 'Codice a barre');
+    assert.equal(document.querySelector('.picker-barcode-form button').disabled, false, 'A cancelled request must leave the next lookup usable');
+    assert.deepEqual(loadData(store).data, initial);
+    assert.equal(store.writes, 1);
+    clickText(document.querySelector('.meal-food-picker'), 'Chiudi aggiunta');
+    composerButton(document, 'Annulla').click();
+    assert.deepEqual(loadData(store).data, initial);
+  });
+}
+
+for (const section of ['Ricette', 'Porzioni']) {
+  test(`switching away from ${section} disposes barcode work and remounts a clean library`, async t => {
+    const initial = generatedDiary(todayKey()), store = new MemoryStorage(); saveData(initial, store);
+    let resolveRequest, signal;
+    const { document } = await bootApp(t, store, 'foods', { fetchImpl: (_url, options) => {
+      signal = options.signal;
+      return new Promise(resolve => { resolveRequest = resolve; });
+    } });
+    let oldPanel, form;
+    if (section === 'Ricette') {
+      oldPanel = document.querySelector('.recipes-panel');
+      clickText(oldPanel, 'Nuova ricetta');
+      controlWithLabel(oldPanel, 'input', 'Nome della ricetta').value = 'Bozza da scartare';
+      openFoodPicker(document, 'Codice a barre');
+      form = oldPanel.querySelector('.picker-barcode-form');
+    } else {
+      selectFoodsView(document, 'Porzioni');
+      oldPanel = document.querySelector('.portions-panel');
+      clickText(oldPanel, 'Nuova porzione');
+      form = oldPanel.querySelector('.barcode-search');
+    }
+    form.querySelector('input').value = '036000291452'; form.dispatch('submit');
+    assert.equal(signal.aborted, false);
+    selectFoodsView(document, 'Impostazioni');
+    assert.equal(signal.aborted, true);
+    assert.equal(oldPanel.isConnected, false);
+    const oldText = oldPanel.textContent;
+    resolveRequest({ ok: true, json: async () => barcodeFixture() });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(oldPanel.textContent, oldText, 'A disposed panel must ignore late barcode results');
+    assert.equal(oldPanel.querySelector('.picker-manual-form, .portion-editor'), null);
+    selectFoodsView(document, section);
+    const newPanel = document.querySelector(section === 'Ricette' ? '.recipes-panel' : '.portions-panel');
+    assert.notEqual(newPanel, oldPanel);
+    assert.ok(isVisible(newPanel.querySelector('.library-view')));
+    assert.equal(newPanel.querySelector('.picker-manual-form, .portion-editor'), null);
+    assert.equal(isVisible(newPanel.querySelector(section === 'Ricette' ? '.recipe-editor' : '.portion-create')), false);
+    assert.deepEqual(loadData(store).data, initial);
+    assert.equal(store.writes, 1);
+  });
+}

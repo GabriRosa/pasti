@@ -645,6 +645,8 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .settings-group > .panel { padding: 0 0 20px; margin: 0; border: 0; background: none; }
 .meal-editor-tools { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
 .meal-editor-tools .button { flex: 1; }
+.meal-editor-view:has(> .meal-food-picker[data-open="true"]) > :not(.meal-food-picker) { display: none; }
+.meal-editor-view > .meal-food-picker[data-open="true"] { margin-top: 0; }
 .meal-food-picker[data-open="false"] { margin: 16px 0; padding: 0; border: 0; background: none; }
 .meal-food-picker[data-open="false"] > .button { width: 100%; }
 .picker-status:empty { display: none; }
