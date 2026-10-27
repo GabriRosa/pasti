@@ -602,3 +602,11 @@ input[type="checkbox"] { accent-color: var(--accent); }
   .edit-ingredient > div:first-child { flex-basis: calc(100% - 120px); }
   .remove-ingredient { margin-left: auto; padding: 0; min-height: 32px; }
 }
+
+.ingredient-quantity-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.save-usual-quantity { font-size: .66rem; padding: 3px 0; min-height: 32px; }
+.edit-ingredient .usual-quantity-note { color: var(--button-bg); }
+.picker-barcode { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line); }
+.picker-barcode h4 { margin: 0 0 12px; font-size: .9rem; }
+.picker-barcode .barcode-search { margin-top: 14px; }
+.meal-heading > .eyebrow { margin-bottom: 12px; }

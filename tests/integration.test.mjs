@@ -2264,11 +2264,10 @@ test('meal composer searches any catalog food, removes base ingredients and save
   document.querySelector('.picker-result').click();
   fillComposer(document, '.picker-amount-form input', '175');
   document.querySelector('.picker-amount-form').dispatch('submit');
-  fillComposer(document, '#app-dialog input[type="text"]', 'Il mio pasto');
   assert.deepEqual(loadData(store).data, initial);
   composerButton(document, 'Salva questo pasto').click();
   const result = loadData(store).data.days[key].meals[0];
-  assert.equal(result.title, 'Il mio pasto');
+  assert.equal(document.querySelector('.meal-card h3'), null);
   assert.deepEqual(result.ingredients, [{ foodId: 'chicken', grams: 175 }]);
   assertMacrosClose(result.macros, foodMacros('chicken', 175));
   assert.equal(result.time, initial.days[key].meals[0].time);
@@ -2335,4 +2334,137 @@ test('invalid ingredient quantities cannot be erased by adding another ingredien
   composerButton(document, 'Salva questo pasto').click();
   assert.equal(document.querySelector('#app-dialog').open, true);
   assert.deepEqual(loadData(store).data, initial);
+});
+
+test('usual catalog quantities are proposed again while one-off amounts leave the preference unchanged', async t => {
+  const key = todayKey(), initial = generatedDiary(key);
+  const store = new MemoryStorage(); saveData(initial, store);
+  const { document } = await bootApp(t, store);
+  assert.equal(document.querySelector('.meal-card h3'), null);
+  openComposer(document);
+  assert.ok(!document.querySelector('#app-dialog').textContent.includes('Nome del pasto'));
+  fillComposer(document, '.meal-food-picker input[type="search"]', 'pollo');
+  document.querySelector('.picker-result').click();
+  fillComposer(document, '.picker-amount-form input[type="number"]', '175');
+  document.querySelector('.remember-quantity').checked = true;
+  document.querySelector('.picker-amount-form').dispatch('submit');
+  assert.equal(loadData(store).data.usualQuantities, undefined);
+  composerButton(document, 'Salva questo pasto').click();
+  assert.deepEqual(loadData(store).data.usualQuantities.chicken, { grams: 175, unit: 'g' });
+  openComposer(document);
+  fillComposer(document, '.meal-food-picker input[type="search"]', 'pollo');
+  document.querySelector('.picker-result').click();
+  assert.equal(document.querySelector('.picker-amount-form input[type="number"]').valueAsNumber, 175);
+  fillComposer(document, '.picker-amount-form input[type="number"]', '120');
+  document.querySelector('.picker-amount-form').dispatch('submit');
+  composerButton(document, 'Salva questo pasto').click();
+  const saved = loadData(store).data;
+  assert.equal(saved.days[key].meals[0].ingredients.at(-1).grams, 120);
+  assert.equal(saved.usualQuantities.chicken.grams, 175);
+});
+
+test('usual quantities set from an ingredient remain a draft until the meal is saved', async t => {
+  const key = todayKey(), initial = generatedDiary(key);
+  const store = new MemoryStorage(); saveData(initial, store);
+  const { document } = await bootApp(t, store);
+  openComposer(document);
+  fillComposer(document, '.edit-ingredients input', '75');
+  document.querySelector('.save-usual-quantity').click();
+  assert.match(document.querySelector('.usual-quantity-note').textContent, /75 g/);
+  composerButton(document, 'Annulla').click();
+  assert.deepEqual(loadData(store).data, initial);
+});
+
+const barcodeFixture = () => ({ product: { product_name: 'Bevanda test', brands: 'Test', nutrition: { aggregated_set: {
+  per: '100ml', preparation: 'as_sold', nutrients: { 'energy-kcal': { value: 40, unit: 'kcal' }, proteins: { value: 3, unit: 'g' }, carbohydrates: { value: 4, unit: 'g' }, fat: { value: 1, unit: 'g' } },
+} } } });
+
+test('barcode lookup adds a snapshot and reuses its usual quantity without a second network call', async t => {
+  const key = todayKey(), initial = generatedDiary(key);
+  const store = new MemoryStorage(); saveData(initial, store);
+  let requests = 0;
+  const { document } = await bootApp(t, store, 'today', { fetchImpl: async (url, options) => {
+    requests++;
+    assert.match(url, /product\/036000291452/);
+    assert.equal(options.credentials, 'omit');
+    return { ok: true, json: async () => barcodeFixture() };
+  } });
+  openComposer(document);
+  fillComposer(document, '.picker-barcode-form input', '036000291452');
+  document.querySelector('.picker-barcode-form').dispatch('submit');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(document.querySelector('.picker-manual-form input').value, 'Bevanda test');
+  const amount = document.querySelectorAll('.picker-manual-form input[type="number"]').at(-1);
+  amount.value = '250'; amount.dispatch('input');
+  document.querySelector('.picker-manual-form').dispatch('submit');
+  composerButton(document, 'Salva questo pasto').click();
+  const saved = loadData(store).data;
+  assert.deepEqual(saved.usualQuantities['barcode-036000291452'], { grams:250, unit:'ml' });
+  assert.equal(saved.days[key].meals[0].ingredients.at(-1).foodSnapshot.barcode, '036000291452');
+  assert.equal(saved.personalPortions[0].grams, 250);
+  openComposer(document);
+  fillComposer(document, '.picker-barcode-form input', '036000291452');
+  document.querySelector('.picker-barcode-form').dispatch('submit');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(requests, 1);
+  assert.equal(document.querySelector('.picker-amount-form input[type="number"]').valueAsNumber, 250);
+});
+
+test('closing the meal editor aborts barcode lookup and ignores late results', async t => {
+  const store = new MemoryStorage(); saveData(generatedDiary(todayKey()), store);
+  let resolveRequest, signal;
+  const { document } = await bootApp(t, store, 'today', { fetchImpl: (_url, options) => {
+    signal = options.signal;
+    return new Promise(resolve => { resolveRequest = resolve; });
+  } });
+  openComposer(document);
+  fillComposer(document, '.picker-barcode-form input', '036000291452');
+  document.querySelector('.picker-barcode-form').dispatch('submit');
+  assert.equal(signal.aborted, false);
+  composerButton(document, 'Annulla').click();
+  assert.equal(signal.aborted, true);
+  resolveRequest({ ok:true, json:async () => barcodeFixture() });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(document.querySelector('.picker-manual-form'), null);
+  assert.equal(document.querySelector('#app-dialog').open, false);
+});
+
+test('a barcode with missing nutrients opens an editor and cannot be added before completion', async t => {
+  const store = new MemoryStorage(); saveData(generatedDiary(todayKey()), store);
+  const { document } = await bootApp(t, store, 'today', { fetchImpl: async () => {
+    const payload = barcodeFixture(); delete payload.product.nutrition.aggregated_set.nutrients.proteins;
+    return { ok: true, json: async () => payload };
+  } });
+  openComposer(document);
+  const count = document.querySelectorAll('.edit-ingredient').length;
+  fillComposer(document, '.picker-barcode-form input', '036000291452');
+  document.querySelector('.picker-barcode-form').dispatch('submit');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(document.querySelector('input[data-metric="protein"]').value, '');
+  document.querySelector('.picker-manual-form').dispatch('submit');
+  assert.equal(document.querySelectorAll('.edit-ingredient').length, count);
+});
+
+test('closing the meal editor stops the barcode camera stream and decoder', async t => {
+  const store = new MemoryStorage(); saveData(generatedDiary(todayKey()), store);
+  const { document } = await bootApp(t, store);
+  let tracksStopped = 0, decoderStopped = 0, acquired = 0;
+  const previous = Object.fromEntries(['navigator', 'ZXingBrowser'].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { mediaDevices: { getUserMedia: async () => {
+    acquired++; return { getTracks: () => [{ stop: () => tracksStopped++ }] };
+  } } } });
+  Object.defineProperty(globalThis, 'ZXingBrowser', { configurable: true, value: { BrowserMultiFormatOneDReader: class {
+    async decodeFromVideoElement() { return { stop: () => decoderStopped++ }; }
+  } } });
+  t.after(() => { for (const [key, descriptor] of Object.entries(previous)) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]; } });
+  openComposer(document);
+  composerButton(document, 'Inquadra codice a barre').click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(acquired, 1);
+  const video = document.querySelector('.picker-camera video');
+  assert.ok(video.srcObject);
+  composerButton(document, 'Annulla').click();
+  assert.equal(tracksStopped, 1);
+  assert.equal(decoderStopped, 1);
+  assert.equal(video.srcObject, null);
 });

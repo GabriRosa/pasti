@@ -125,7 +125,7 @@ function day(value, key) {
 }
 export function validateData(data) {
   safeTree(data);
-  keys(data, ['schemaVersion', 'profile', 'foodOverrides', 'days', 'personalPortions'], 'documento');
+  keys(data, ['schemaVersion', 'profile', 'foodOverrides', 'days', 'personalPortions', 'usualQuantities'], 'documento');
   if (data.schemaVersion !== SCHEMA_VERSION) fail('versione non supportata.');
   if (data.profile !== null) validateProfile(data.profile);
   object(data.foodOverrides, 'etichette alimentari.');
@@ -141,6 +141,16 @@ export function validateData(data) {
       keys(portion, ['id', 'food', 'grams'], 'porzione personale');
       if (typeof portion.id !== 'string' || !/^personal-[a-zA-Z0-9-]{1,80}$/.test(portion.id) || ids.has(portion.id)) fail('identificativo porzione.');
       ids.add(portion.id); validatePersonalFood(portion.food); number(portion.grams, 0.1, 3000, 'quantità della porzione.');
+    }
+  }
+  if (data.usualQuantities !== undefined) {
+    object(data.usualQuantities, 'quantità abituali.');
+    if (Object.keys(data.usualQuantities).length > 500) fail('massimo 500 quantità abituali.');
+    for (const [id, quantity] of Object.entries(data.usualQuantities)) {
+      if (!/^[a-zA-Z0-9-]{1,100}$/.test(id)) fail('identificativo quantità abituale.');
+      keys(quantity, ['grams', 'unit'], 'quantità abituale');
+      number(quantity.grams, 0.1, 3000, 'quantità abituale.');
+      if (!['g', 'ml'].includes(quantity.unit)) fail('unità della quantità abituale.');
     }
   }
   object(data.days, 'diario.');
