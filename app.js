@@ -1,14 +1,14 @@
-import { MACRO_CHART_KEYS, macroGrams, macroChartSvg } from './src/macro-chart.js?v=20261027-black-cards';
-import { renderPortions } from './src/portions-ui.js?v=20261027-black-cards';
-import { ACTIVITY_LEVELS, calculateTargets, sumMacros } from './src/nutrition.js?v=20261027-black-cards';
-import { FOODS, LIDL_FOOD_IDS, getFood, getIngredientFood, ingredientMacros } from './src/foods.js?v=20261027-black-cards';
-import { createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } from './src/planner.js?v=20261027-black-cards';
-import { trainingForDate, validateTrainingPlan, TRAINING_LOG_TYPES, validateTrainingLog, trainingLogLabel } from './src/training.js?v=20261027-black-cards';
-import { parseActivityCsv, suggestActivityColumns, summarizeActivityCsv } from './src/activity-import.js?v=20261027-black-cards';
-import { STORAGE_KEY, MAX_BACKUP_BYTES, createEmptyData, validateData, parseBackup, loadData, saveData, exportBackup, clearData } from './src/storage.js?v=20261027-black-cards';
-import { GOOGLE_HEALTH_CLIENT_ID } from './src/google-health-config.js?v=20261027-black-cards';
-import { createGoogleHealthSession } from './src/google-health-session.js?v=20261027-black-cards';
-import { prepareGoogleHealthConsumedMeal } from './src/google-health-nutrition.js?v=20261027-black-cards';
+import { MACRO_CHART_KEYS, macroGrams, macroChartSvg } from './src/macro-chart.js?v=20261027-neutral';
+import { renderPortions } from './src/portions-ui.js?v=20261027-neutral';
+import { ACTIVITY_LEVELS, calculateTargets, sumMacros } from './src/nutrition.js?v=20261027-neutral';
+import { FOODS, LIDL_FOOD_IDS, getFood, getIngredientFood, ingredientMacros } from './src/foods.js?v=20261027-neutral';
+import { createDayPlan, mealFromIngredients, mealAlternatives, swapMealFood } from './src/planner.js?v=20261027-neutral';
+import { trainingForDate, validateTrainingPlan, TRAINING_LOG_TYPES, validateTrainingLog, trainingLogLabel } from './src/training.js?v=20261027-neutral';
+import { parseActivityCsv, suggestActivityColumns, summarizeActivityCsv } from './src/activity-import.js?v=20261027-neutral';
+import { STORAGE_KEY, MAX_BACKUP_BYTES, createEmptyData, validateData, parseBackup, loadData, saveData, exportBackup, clearData } from './src/storage.js?v=20261027-neutral';
+import { GOOGLE_HEALTH_CLIENT_ID } from './src/google-health-config.js?v=20261027-neutral';
+import { createGoogleHealthSession } from './src/google-health-session.js?v=20261027-neutral';
+import { prepareGoogleHealthConsumedMeal } from './src/google-health-nutrition.js?v=20261027-neutral';
 
 const $ = selector => document.querySelector(selector);
 const clone = value => JSON.parse(JSON.stringify(value));

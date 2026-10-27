@@ -1,4 +1,4 @@
-import { validateTrainingPlan } from './training.js?v=20261027-black-cards';
+import { validateTrainingPlan } from './training.js?v=20261027-neutral';
 
 /** Estimates for healthy adults. See docs/nutrition.md for assumptions and sources. */
 export const ACTIVITY_LEVELS = Object.freeze([

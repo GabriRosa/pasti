@@ -1,6 +1,6 @@
-import { validatePersonalFood } from './barcode.js?v=20261027-black-cards';
-import { calculateTargets } from './nutrition.js?v=20261027-black-cards';
-import { validateTrainingPlan, validateTrainingLog } from './training.js?v=20261027-black-cards';
+import { validatePersonalFood } from './barcode.js?v=20261027-neutral';
+import { calculateTargets } from './nutrition.js?v=20261027-neutral';
+import { validateTrainingPlan, validateTrainingLog } from './training.js?v=20261027-neutral';
 
 /** Local-only, versioned persistence. All writes validate before replacing data. */
 export const STORAGE_KEY = 'pasti.data.v1';
